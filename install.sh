@@ -215,13 +215,29 @@ step "Configuring Claude Code Shell Wrapper & Model Mappings"
 BASHRC="$HOME/.bashrc"
 WRAPPER_TAG="# FreeDeepseekAPI Claude Wrapper"
 
-# Remove old wrapper block if present to ensure updated path and mappings
-if grep -q "$WRAPPER_TAG" "$BASHRC" 2>/dev/null; then
-    info "Updating existing shell wrapper in ~/.bashrc..."
-    sed -i '/# FreeDeepseekAPI Claude Wrapper/,+25d' "$BASHRC" 2>/dev/null || true
+# 1. Ensure PATH contains ~/.local/bin and npm global bin
+NPM_BIN_DIR=""
+if command -v npm >/dev/null 2>&1; then
+    NPM_BIN_DIR="$(npm config get prefix 2>/dev/null)/bin"
 fi
 
-info "Adding 'claude' wrapper and DeepSeek model mappings to ~/.bashrc..."
+if ! echo "$PATH" | grep -q "$HOME/.local/bin" && ! grep -q "PATH.*\.local/bin" "$BASHRC" 2>/dev/null; then
+    info "Adding ~/.local/bin to PATH in ~/.bashrc..."
+    echo -e '\nexport PATH="$HOME/.local/bin:$PATH"' >> "$BASHRC"
+fi
+
+if [ -n "$NPM_BIN_DIR" ] && ! echo "$PATH" | grep -q "$NPM_BIN_DIR" && ! grep -q "PATH.*$NPM_BIN_DIR" "$BASHRC" 2>/dev/null; then
+    info "Adding $NPM_BIN_DIR to PATH in ~/.bashrc..."
+    echo -e "\nexport PATH=\"$NPM_BIN_DIR:\$PATH\"" >> "$BASHRC"
+fi
+
+# 2. Update ONLY the FreeDeepseekAPI wrapper block in ~/.bashrc without touching other lines
+if grep -q "$WRAPPER_TAG" "$BASHRC" 2>/dev/null; then
+    info "Updating existing FreeDeepseekAPI wrapper block in ~/.bashrc..."
+    sed -i '/# FreeDeepseekAPI Claude Wrapper/,/# End FreeDeepseekAPI Claude Wrapper/d' "$BASHRC" 2>/dev/null || true
+fi
+
+info "Appending FreeDeepseekAPI wrapper block to ~/.bashrc..."
 cat << 'EOF_BASHRC' >> "$BASHRC"
 
 # FreeDeepseekAPI Claude Wrapper
@@ -250,8 +266,9 @@ alias claude-reasoner='claude --model deepseek-reasoner'
 alias claude-r1='claude --model deepseek-r1'
 alias claude-expert='claude --model deepseek-expert'
 alias claude-v4-pro='claude --model deepseek-v4-pro'
+# End FreeDeepseekAPI Claude Wrapper
 EOF_BASHRC
-success "Shell wrapper and model mappings added to ~/.bashrc."
+success "Shell wrapper and model mappings updated in ~/.bashrc."
 
 # Try to source ~/.bashrc into current process if run via source
 if [ -r "$BASHRC" ]; then
