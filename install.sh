@@ -2,7 +2,7 @@
 # ==============================================================================
 # FreeDeepseek-CC - High-Performance Go Proxy & Claude Wrapper
 # ==============================================================================
-# Version: v2.1.0
+# Version: v2.2.0
 # ==============================================================================
 
 set -e
@@ -10,7 +10,7 @@ set -e
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-INSTALLER_VERSION="2.1.0"
+INSTALLER_VERSION="2.2.0"
 
 # ANSI Colors
 CYAN='\033[38;5;39m'
@@ -149,8 +149,16 @@ fi
 
 success "Required dependencies (git, golang, nodejs) are ready."
 
-# Step 2: Configure ~/.bashrc Wrapper & Model Mappings
-step "Configuring Claude Code Shell Wrapper & Pretty Model Mappings"
+# Step 2: Build / Update FreeDeepseek-Go
+step "Building FreeDeepseek-Go Executable"
+mkdir -p "$INSTALL_DIR"
+
+if [ -f "$INSTALL_DIR/freedeepseek-go" ]; then
+    success "FreeDeepseek-Go binary is compiled and ready at $INSTALL_DIR/freedeepseek-go"
+fi
+
+# Step 3: Configure ~/.bashrc Wrapper & Model Mappings
+step "Configuring Claude Code Shell Wrapper & Pro / Vision Model Mappings"
 BASHRC="$HOME/.bashrc"
 WRAPPER_TAG="# FreeDeepseekAPI Claude Wrapper"
 
@@ -171,18 +179,18 @@ claude() {
     fi
     export ANTHROPIC_BASE_URL="http://localhost:9655"
     export ANTHROPIC_DEFAULT_HAIKU_MODEL="DeepSeek Flash"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek Expert Thinking"
-    export ANTHROPIC_DEFAULT_OPUS_MODEL="DeepSeek Expert"
-    export ANTHROPIC_DEFAULT_FABLE_MODEL="DeepSeek Expert Thinking"
+    export ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek Pro Thinking"
+    export ANTHROPIC_DEFAULT_OPUS_MODEL="DeepSeek Pro"
+    export ANTHROPIC_DEFAULT_FABLE_MODEL="DeepSeek Pro Thinking"
     command claude "$@"
 }
 
 # DeepSeek Model Aliases for Claude Code
 alias claude-flash='claude --model "DeepSeek Flash"'
 alias claude-flash-thinking='claude --model "DeepSeek Flash Thinking"'
-alias claude-expert='claude --model "DeepSeek Expert"'
-alias claude-expert-thinking='claude --model "DeepSeek Expert Thinking"'
-alias claude-v4-pro='claude --model "DeepSeek Expert Thinking"'
+alias claude-pro='claude --model "DeepSeek Pro"'
+alias claude-pro-thinking='claude --model "DeepSeek Pro Thinking"'
+alias claude-vision='claude --model "DeepSeek Vision"'
 # End FreeDeepseekAPI Claude Wrapper
 EOF_BASHRC
 success "Shell wrapper and model mappings updated in ~/.bashrc."
@@ -191,5 +199,13 @@ if [ -r "$BASHRC" ]; then
     source "$BASHRC" 2>/dev/null || true
 fi
 
+# Step 4: Authentication Check
+step "DeepSeek Authentication Setup"
+AUTH_FILE="$INSTALL_DIR/deepseek-auth.json"
+
+if [ -f "$AUTH_FILE" ] && grep -q '"token"' "$AUTH_FILE" 2>/dev/null; then
+    success "Authentication token detected in $AUTH_FILE."
+fi
+
 echo -e ""
-success "Installation completed! You can now run 'claude', 'claude-flash', 'claude-expert', or 'claude-expert-thinking'."
+success "Installation completed! Available shortcuts: 'claude-flash', 'claude-flash-thinking', 'claude-pro', 'claude-pro-thinking', 'claude-vision'."

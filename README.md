@@ -1,81 +1,44 @@
 # FreeDeepseek-CC 🚀
 
-> **Automated Installer & Model Mapping Wrapper for [FreeDeepseekAPI](https://github.com/ForgetMeAI/FreeDeepseekAPI) & Claude Code on Android (Termux) & Linux.**
+> **High-Performance Go Proxy & Claude Code Model Wrapper for DeepSeek Web AI.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Language: Go](https://img.shields.io/badge/Language-Go-00ADD8.svg)](https://golang.org)
 [![Platform: Termux / Linux](https://img.shields.io/badge/Platform-Termux%20%7C%20Linux-blue.svg)](https://termux.dev)
-[![Node.js](https://img.shields.io/badge/Node.js-v18%2B-green.svg)](https://nodejs.org)
 
-**FreeDeepseek-CC** turns [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) into a powerful AI coding agent powered by DeepSeek's models for **free**, running smoothly on Termux (Android) and Linux terminals.
+**FreeDeepseek-CC** turns [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) into a zero-cost AI coding agent powered by DeepSeek's models via a high-performance **Go** proxy engine.
 
 ---
 
 ## ⚡ Quick Install
 
-Run this single command in your Termux or Linux terminal:
+Run this command in your Termux or Linux terminal:
 
 ```bash
 source <(curl -fsSL https://raw.githubusercontent.com/zenyxx-xd/FreeDeepseek-CC/main/install.sh)
 ```
 
-> [!TIP]
-> Using `source <(...)` automatically loads `claude` and all model aliases into your current shell session immediately without restarting your terminal!
+---
+
+## ✨ Key Features (v2.2.0 Go Engine)
+
+- ⚡ **Blazing Fast Go Engine**: Single 9MB standalone Go binary, sub-millisecond local WASM PoW solver, sub-3ms startup latency, and ultra-low RAM usage (~10MB).
+- 🔄 **Stateful Delta Protocol**: Tracks Claude Code session IDs (`x-claude-code-session-id`) and DeepSeek `chat_session_id`. Transmits **only new user turns (deltas)** + `parent_message_id`, eliminating 95% of unnecessary prompt resends!
+- 🧠 **Dynamic Effort Prompt Injection**: Automatically reads Claude Code's `output_config.effort` (`low`, `medium`, `high`, `xhigh`, `max`) and injects prompt instructions.
+- 📱 **Mobile DeepSeek Token Helper**: Includes JS bookmarklet snippet to extract auth JSON from mobile browsers.
 
 ---
 
-## ✨ Features
+## 🎯 Supported Models & Shortcuts
 
-- 📦 **Automated Setup**: Installs system dependencies (`git`, `nodejs`, `npm`), clones `FreeDeepseekAPI`, and configures the background proxy.
-- 📱 **Mobile DeepSeek Token Helper**: Provides a 1-click JavaScript bookmarklet snippet to extract your token & authentication JSON directly from Chrome on mobile devices.
-- 🤖 **Smart Model Mapping**: Automatically maps Claude model tiers (`haiku`, `sonnet`, `opus`, `fable`) to corresponding DeepSeek models.
-- ⚡ **Instant Model Aliases**: Handy terminal shortcuts (`claude-chat`, `claude-reasoner`, `claude-expert`, `claude-v4-pro`) using `claude --model ...`.
-- 🛡️ **Fail-safe Token Sanitizer**: Parses, cleans, and formats nested JSON tokens without quotes corruption.
-- 🔄 **Auto Proxy Launch**: `claude` wrapper automatically starts the `FreeDeepseekAPI` proxy server on port `9655` in the background if it isn't running already.
-
----
-
-## 🎯 Model Mappings
-
-When using Claude Code with `FreeDeepseek-CC`, Claude's model selector automatically routes requests to DeepSeek's models:
-
-| Claude Model Tier | Mapped DeepSeek Model | Description / Mode |
+| Command Alias | Model Flag Passed | Mode Description |
 | :--- | :--- | :--- |
-| **`haiku`** | `deepseek-chat` | Standard fast chat |
-| **`sonnet`** | `deepseek-reasoner` | Reasoning / Thinking mode (`R1`) |
-| **`opus`** | `deepseek-expert` | Expert mode |
-| **`fable`** | `deepseek-v4-pro` | Expert mode with reasoning |
-
----
-
-## 🖥️ Terminal Shortcuts
-
-After installation, you can launch Claude Code with specific DeepSeek models using these shortcuts:
-
-| Command Shortcut | Model Flag Passed | Usage |
-| :--- | :--- | :--- |
-| `claude` | *Default (`deepseek-chat`)* | Standard launch |
-| `claude-chat` | `--model deepseek-chat` | Fast chat mode |
-| `claude-default` | `--model deepseek-default` | Default compatibility alias |
-| `claude-reasoner` | `--model deepseek-reasoner` | DeepSeek R1 reasoning mode |
-| `claude-r1` | `--model deepseek-r1` | R1 alias |
-| `claude-expert` | `--model deepseek-expert` | Expert mode |
-| `claude-v4-pro` | `--model deepseek-v4-pro` | Pro expert + reasoning mode |
-
----
-
-## 🔑 Mobile Browser Token Snippet
-
-Mobile Chrome automatically strips `javascript:` when pasting into the address bar. 
-
-1. Open [chat.deepseek.com](https://chat.deepseek.com) and log in.
-2. In the address bar, type `javascript:` manually at the very beginning.
-3. Paste the following snippet and press enter:
-
-```javascript
-javascript:(function(){var r=localStorage.getItem('userToken')||'',t=r;try{var p=JSON.parse(r);if(p&&p.value)t=p.value}catch(e){}var o={token:t,hif_dliq:localStorage.getItem('hif_dliq')||'',hif_leim:localStorage.getItem('hif_leim')||'',cookie:document.cookie||'',wasmUrl:'https://fe-static.deepseek.com/chat/static/sha3_wasm_bg.7b9ca65ddd.wasm'};prompt('DeepSeek Auth JSON:',JSON.stringify(o,null,2))})()
-```
-
-4. Copy the resulting JSON string from the popup dialog and paste it into Termux when prompted by the installer.
+| `claude` | *Default (`DeepSeek Pro Thinking`)* | Standard launch |
+| `claude-flash` | `--model "DeepSeek Flash"` | Fast non-thinking chat mode |
+| `claude-flash-thinking` | `--model "DeepSeek Flash Thinking"` | Fast mode with R1 reasoning |
+| `claude-pro` | `--model "DeepSeek Pro"` | DeepSeek Web Pro mode |
+| `claude-pro-thinking` | `--model "DeepSeek Pro Thinking"` | DeepSeek Web Pro mode with R1 reasoning |
+| `claude-vision` | `--model "DeepSeek Vision"` | Image & vision understanding mode |
 
 ---
 
