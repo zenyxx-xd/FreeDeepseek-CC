@@ -2,7 +2,7 @@
 # ==============================================================================
 # FreeDeepseek-CC - Proxy & Claude Wrapper
 # ==============================================================================
-# Version: v2.4.0
+# Version: v2.4.1
 # ==============================================================================
 
 set -e
@@ -10,7 +10,7 @@ set -e
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-INSTALLER_VERSION="2.4.0"
+INSTALLER_VERSION="2.4.1"
 
 # ANSI Colors
 CYAN='\033[38;5;39m'
@@ -256,18 +256,18 @@ claude() {
         sleep 1
     fi
     export ANTHROPIC_BASE_URL="http://localhost:9655"
-    export ANTHROPIC_DEFAULT_HAIKU_MODEL="DeepSeek Flash"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek Pro Thinking"
     export ANTHROPIC_DEFAULT_OPUS_MODEL="DeepSeek Pro"
+    export ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek Pro Thinking"
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL="DeepSeek Flash"
     export ANTHROPIC_DEFAULT_FABLE_MODEL="DeepSeek Flash Thinking"
     command claude "\$@"
 }
 
 # DeepSeek Model Aliases for Claude Code
-alias claude-flash='claude --model "DeepSeek Flash"'
-alias claude-flash-thinking='claude --model "DeepSeek Flash Thinking"'
 alias claude-pro='claude --model "DeepSeek Pro"'
 alias claude-pro-thinking='claude --model "DeepSeek Pro Thinking"'
+alias claude-flash='claude --model "DeepSeek Flash"'
+alias claude-flash-thinking='claude --model "DeepSeek Flash Thinking"'
 alias claude-vision='claude --model "DeepSeek Vision"'
 alias claude-vision-thinking='claude --model "DeepSeek Vision Thinking"'
 # End FreeDeepseekAPI Claude Wrapper
@@ -377,7 +377,7 @@ fi
 
 step "Installation Summary"
 info "Installation Path: $INSTALL_DIR"
-info "Available Shortcuts: claude-flash, claude-flash-thinking, claude-pro, claude-pro-thinking, claude-vision, claude-vision-thinking"
+info "Available Shortcuts: claude-pro, claude-pro-thinking, claude-flash, claude-flash-thinking, claude-vision, claude-vision-thinking"
 
 echo -e ""
 success "Installation completed successfully!"
