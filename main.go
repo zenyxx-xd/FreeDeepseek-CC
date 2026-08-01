@@ -25,7 +25,7 @@ func main() {
 
 	server, err := proxy.NewServer(baseDir)
 	if err != nil {
-		log.Fatalf("Fatal error initializing FreeDeepseek-Go proxy: %v", err)
+		log.Fatalf("Fatal error initializing FreeDeepseek-CC proxy: %v", err)
 	}
 
 	if err := server.Start(*portFlag); err != nil {

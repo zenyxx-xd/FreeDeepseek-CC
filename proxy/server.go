@@ -89,7 +89,7 @@ func (s *Server) Start(port string) error {
 		WriteTimeout: 0, // Streaming responses require no write timeout
 	}
 
-	log.Printf("⚡ FreeDeepseek-Go Proxy server listening on http://localhost:%s", port)
+	log.Printf("⚡ FreeDeepseek-CC Proxy server listening on http://localhost:%s", port)
 	return server.ListenAndServe()
 }
 
@@ -98,7 +98,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
-		"service": "FreeDeepseek-Go Proxy",
+		"service": "FreeDeepseek-CC Proxy",
 		"version": "1.0.0",
 	})
 }

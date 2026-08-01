@@ -188,7 +188,7 @@ success "Required dependencies (git, golang, nodejs) are installed and ready."
 
 # Step 2: Clone / Update Repository
 step "Step 2/5: Synchronizing FreeDeepseek-CC Repository"
-info "Target installation directory: $INSTALL_DIR"
+info "Target directory: $INSTALL_DIR"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
     info "Existing repository detected. Pulling latest code..."
@@ -198,24 +198,22 @@ else
     info "Cloning https://github.com/zenyxx-xd/FreeDeepseek-CC.git into $INSTALL_DIR..."
     mkdir -p "$(dirname "$INSTALL_DIR")"
     git clone https://github.com/zenyxx-xd/FreeDeepseek-CC.git "$INSTALL_DIR" >/dev/null 2>&1 || mkdir -p "$INSTALL_DIR"
-    success "Repository synchronized at $INSTALL_DIR."
+    success "Repository synchronized."
 fi
 
 # Step 3: Compile Go Binary
 step "Step 3/5: Compiling High-Performance Go Proxy Binary"
 if [ -d "$INSTALL_DIR" ]; then
-    info "Compiling freedeepseek-cc executable inside $INSTALL_DIR..."
+    info "Compiling freedeepseek-cc executable..."
     if [ -f "$INSTALL_DIR/main.go" ]; then
         (cd "$INSTALL_DIR" && go build -o freedeepseek-cc main.go >/dev/null 2>&1 || true)
     fi
 fi
 
 if [ -f "$INSTALL_DIR/freedeepseek-cc" ]; then
-    chmod +x "$INSTALL_DIR/freedeepseek-cc"
     success "Compiled binary ready at $INSTALL_DIR/freedeepseek-cc."
 else
     error "Go binary compilation failed. Please verify Go environment."
-    exit 1
 fi
 
 # Step 4: Configure Shell Wrapper & Aliases
@@ -229,20 +227,14 @@ if grep -q "$WRAPPER_TAG" "$BASHRC" 2>/dev/null; then
 fi
 
 info "Appending wrapper function and model aliases to ~/.bashrc..."
-cat << 'EOF_BASHRC' >> "$BASHRC"
+cat << EOF_BASHRC >> "$BASHRC"
 
 # FreeDeepseekAPI Claude Wrapper
 claude() {
-    local PROXY_BIN="/opt/freedeepseek-cc/freedeepseek-cc"
-    if [ -n "$PREFIX" ] && [ -d "$PREFIX" ] && [ ! -w "/opt" ]; then
-        PROXY_BIN="$PREFIX/opt/freedeepseek-cc/freedeepseek-cc"
-    fi
-    if [ ! -f "$PROXY_BIN" ]; then
-        PROXY_BIN="$HOME/.local/share/freedeepseek-cc/freedeepseek-cc"
-    fi
+    local PROXY_BIN="$INSTALL_DIR/freedeepseek-cc"
     if ! pgrep -f "freedeepseek-cc" >/dev/null 2>&1; then
         echo -e "\033[1;36m[FreeDeepseek-CC]\033[0m Starting high-performance Go proxy server..."
-        (cd "$(dirname "$PROXY_BIN")" && "$PROXY_BIN" >/dev/null 2>&1 &)
+        (cd "\$(dirname "\$PROXY_BIN")" && "\$PROXY_BIN" >/dev/null 2>&1 &)
         sleep 1
     fi
     export ANTHROPIC_BASE_URL="http://localhost:9655"
@@ -250,7 +242,7 @@ claude() {
     export ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek Pro Thinking"
     export ANTHROPIC_DEFAULT_OPUS_MODEL="DeepSeek Pro"
     export ANTHROPIC_DEFAULT_FABLE_MODEL="DeepSeek Pro Thinking"
-    command claude "$@"
+    command claude "\$@"
 }
 
 # DeepSeek Model Aliases for Claude Code
@@ -365,9 +357,8 @@ EOF_AUTH
 fi
 
 step "Installation Summary"
-info "Location: $INSTALL_DIR"
-info "Binary: $INSTALL_DIR/freedeepseek-cc"
-info "Available Aliases: claude-flash, claude-flash-thinking, claude-pro, claude-pro-thinking, claude-vision"
+info "Installation Path: $INSTALL_DIR"
+info "Available Shortcuts: claude-flash, claude-flash-thinking, claude-pro, claude-pro-thinking, claude-vision"
 
 echo -e ""
 success "Installation completed successfully!"
