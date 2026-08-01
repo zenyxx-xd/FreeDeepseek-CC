@@ -2,7 +2,7 @@
 # ==============================================================================
 # FreeDeepseek-CC - Proxy & Claude Wrapper
 # ==============================================================================
-# Version: v2.3.3
+# Version: v2.4.0
 # ==============================================================================
 
 set -e
@@ -10,7 +10,7 @@ set -e
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-INSTALLER_VERSION="2.3.3"
+INSTALLER_VERSION="2.4.0"
 
 # ANSI Colors
 CYAN='\033[38;5;39m'
@@ -269,6 +269,7 @@ alias claude-flash-thinking='claude --model "DeepSeek Flash Thinking"'
 alias claude-pro='claude --model "DeepSeek Pro"'
 alias claude-pro-thinking='claude --model "DeepSeek Pro Thinking"'
 alias claude-vision='claude --model "DeepSeek Vision"'
+alias claude-vision-thinking='claude --model "DeepSeek Vision Thinking"'
 # End FreeDeepseekAPI Claude Wrapper
 EOF_BASHRC
 success "Shell wrapper, PATH exports, and model aliases successfully configured in ~/.bashrc."
@@ -376,7 +377,7 @@ fi
 
 step "Installation Summary"
 info "Installation Path: $INSTALL_DIR"
-info "Available Shortcuts: claude-flash, claude-flash-thinking, claude-pro, claude-pro-thinking, claude-vision"
+info "Available Shortcuts: claude-flash, claude-flash-thinking, claude-pro, claude-pro-thinking, claude-vision, claude-vision-thinking"
 
 echo -e ""
 success "Installation completed successfully!"

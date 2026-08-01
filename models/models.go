@@ -46,15 +46,22 @@ func ResolveModel(requestedModel string, thinkingExplicitlyEnabled bool) ModelCo
 	case "deepseek vision", "deepseek-vision", "vision":
 		return ModelConfig{
 			ModelType:       "vision",
-			ThinkingEnabled: false,
+			ThinkingEnabled: thinkingExplicitlyEnabled,
 			SearchEnabled:   false,
 			DisplayName:     "DeepSeek Vision",
+		}
+	case "deepseek vision thinking", "deepseek-vision-thinking":
+		return ModelConfig{
+			ModelType:       "vision",
+			ThinkingEnabled: true,
+			SearchEnabled:   false,
+			DisplayName:     "DeepSeek Vision Thinking",
 		}
 	default:
 		if strings.Contains(m, "vision") {
 			return ModelConfig{
 				ModelType:       "vision",
-				ThinkingEnabled: false,
+				ThinkingEnabled: strings.Contains(m, "thinking") || thinkingExplicitlyEnabled,
 				SearchEnabled:   false,
 				DisplayName:     "DeepSeek Vision",
 			}
