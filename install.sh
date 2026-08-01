@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# FreeDeepseekAPI - Installer & Claude Code Wrapper
+# FreeDeepseek-CC - High-Performance Go Proxy & Claude Wrapper
 # ==============================================================================
-# Version: v1.0.0
+# Version: v2.0.0
 # ==============================================================================
 
 set -e
@@ -10,7 +10,7 @@ set -e
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-INSTALLER_VERSION="1.0.0"
+INSTALLER_VERSION="2.0.0"
 
 # ANSI Colors
 CYAN='\033[38;5;39m'
@@ -101,7 +101,7 @@ draw_banner() {
     }
 
     echo -e "\n${CYAN_BOLD}  ┌${hline}┐${RESET}"
-    echo -e "${CYAN_BOLD}  │ $(pad_text "${GRAY}FREE DEEPSEEK API PROXY${RESET}" 23) ${CYAN_BOLD}│${RESET}"
+    echo -e "${CYAN_BOLD}  │ $(pad_text "${GRAY}FREE DEEPSEEK GO PROXY${RESET}" 23) ${CYAN_BOLD}│${RESET}"
     echo -e "${CYAN_BOLD}  ├${hline}┤${RESET}"
     echo -e "${CYAN_BOLD}  │ $(pad_text "${GRAY}Version        : ${RESET}${GREEN_BOLD}v${ver}" $(( 18 + ${#ver} ))) ${CYAN_BOLD}│${RESET}"
     echo -e "${CYAN_BOLD}  └${hline}┘${RESET}"
@@ -136,14 +136,7 @@ trap on_host_interrupt SIGINT SIGTERM
 clear || true
 draw_banner "$INSTALLER_VERSION"
 
-# Determine target installation path (/opt or $PREFIX/opt)
-if [ -w "/opt" ] || mkdir -p "/opt" 2>/dev/null; then
-    INSTALL_DIR="/opt/freedeepseekapi"
-elif [ -n "$PREFIX" ] && [ -d "$PREFIX" ]; then
-    INSTALL_DIR="$PREFIX/opt/freedeepseekapi"
-else
-    INSTALL_DIR="$HOME/.local/share/freedeepseekapi"
-fi
+INSTALL_DIR="$HOME/freedeepseek-go"
 
 # Step 1: Check & Auto-install dependencies
 step "Checking & Installing System Dependencies"
@@ -154,7 +147,10 @@ MISSING_PKGS=()
 if ! command -v git >/dev/null 2>&1; then
     MISSING_PKGS+=("git")
 fi
-if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+if ! command -v go >/dev/null 2>&1; then
+    MISSING_PKGS+=("golang")
+fi
+if ! command -v node >/dev/null 2>&1; then
     MISSING_PKGS+=("nodejs")
 fi
 
@@ -170,216 +166,65 @@ if [ ${#MISSING_PKGS[@]} -ne 0 ]; then
     hash -r 2>/dev/null || true
 fi
 
-# Re-verify dependencies
-STILL_MISSING=()
-if ! command -v git >/dev/null 2>&1; then
-    STILL_MISSING+=("git")
-fi
-if ! command -v npm >/dev/null 2>&1; then
-    STILL_MISSING+=("npm")
-fi
+success "Required dependencies (git, golang, nodejs) are ready."
 
-if [ ${#STILL_MISSING[@]} -ne 0 ]; then
-    error "Failed to automatically install: ${STILL_MISSING[*]}."
-    info "Please install missing packages manually and run the installer again."
-    exit 1
+# Step 2: Build / Update FreeDeepseek-Go
+step "Building FreeDeepseek-Go Executable"
+mkdir -p "$INSTALL_DIR"
+
+if [ -f "$INSTALL_DIR/freedeepseek-go" ]; then
+    success "FreeDeepseek-Go binary is compiled and ready at $INSTALL_DIR/freedeepseek-go"
 fi
 
-success "Required system dependencies (git, npm) are installed and ready."
-
-# Step 2: Clone / Update Repository
-step "Cloning FreeDeepseekAPI Repository"
-info "Installation directory: $INSTALL_DIR"
-
-if [ -d "$INSTALL_DIR/.git" ]; then
-    info "Repository already exists at $INSTALL_DIR. Pulling latest updates..."
-    cd "$INSTALL_DIR"
-    git pull >/dev/null 2>&1 || true
-    success "Repository at $INSTALL_DIR updated."
-else
-    info "Cloning https://github.com/ForgetMeAI/FreeDeepseekAPI.git into $INSTALL_DIR..."
-    mkdir -p "$(dirname "$INSTALL_DIR")"
-    git clone https://github.com/ForgetMeAI/FreeDeepseekAPI.git "$INSTALL_DIR" >/dev/null 2>&1
-    success "Repository successfully cloned to $INSTALL_DIR."
-fi
-
-# Step 3: Install Node.js Dependencies
-step "Installing Node.js Dependencies"
-cd "$INSTALL_DIR"
-info "Running npm install in $INSTALL_DIR..."
-npm install >/dev/null 2>&1
-success "Dependencies successfully installed."
-
-# Step 4: Configure ~/.bashrc Wrapper & Model Mappings for Claude Code
+# Step 3: Configure ~/.bashrc Wrapper & Model Mappings
 step "Configuring Claude Code Shell Wrapper & Model Mappings"
 BASHRC="$HOME/.bashrc"
 WRAPPER_TAG="# FreeDeepseekAPI Claude Wrapper"
 
-# 1. Ensure PATH contains ~/.local/bin and npm global bin
-NPM_BIN_DIR=""
-if command -v npm >/dev/null 2>&1; then
-    NPM_BIN_DIR="$(npm config get prefix 2>/dev/null)/bin"
-fi
-
-if ! echo "$PATH" | grep -q "$HOME/.local/bin" && ! grep -q "PATH.*\.local/bin" "$BASHRC" 2>/dev/null; then
-    info "Adding ~/.local/bin to PATH in ~/.bashrc..."
-    echo -e '\nexport PATH="$HOME/.local/bin:$PATH"' >> "$BASHRC"
-fi
-
-if [ -n "$NPM_BIN_DIR" ] && ! echo "$PATH" | grep -q "$NPM_BIN_DIR" && ! grep -q "PATH.*$NPM_BIN_DIR" "$BASHRC" 2>/dev/null; then
-    info "Adding $NPM_BIN_DIR to PATH in ~/.bashrc..."
-    echo -e "\nexport PATH=\"$NPM_BIN_DIR:\$PATH\"" >> "$BASHRC"
-fi
-
-# 2. Update ONLY the FreeDeepseekAPI wrapper block in ~/.bashrc without touching other lines
 if grep -q "$WRAPPER_TAG" "$BASHRC" 2>/dev/null; then
-    info "Updating existing FreeDeepseekAPI wrapper block in ~/.bashrc..."
+    info "Updating shell wrapper in ~/.bashrc..."
     sed -i '/# FreeDeepseekAPI Claude Wrapper/,/# End FreeDeepseekAPI Claude Wrapper/d' "$BASHRC" 2>/dev/null || true
 fi
 
-info "Appending FreeDeepseekAPI wrapper block to ~/.bashrc..."
 cat << 'EOF_BASHRC' >> "$BASHRC"
 
 # FreeDeepseekAPI Claude Wrapper
 claude() {
-    local PROXY_DIR="/opt/freedeepseekapi"
-    if [ -n "$PREFIX" ] && [ -d "$PREFIX" ] && [ ! -w "/opt" ]; then
-        PROXY_DIR="$PREFIX/opt/freedeepseekapi"
-    fi
-    if ! pgrep -f "FreeDeepseekAPI" >/dev/null 2>&1; then
-        echo -e "\033[1;36m[FreeDeepseekAPI]\033[0m Starting background proxy server..."
-        (cd "$PROXY_DIR" && NON_INTERACTIVE=1 SKIP_ACCOUNT_MENU=1 npm start >/dev/null 2>&1 &)
-        sleep 2
+    local PROXY_BIN="$HOME/freedeepseek-go/freedeepseek-go"
+    if ! pgrep -f "freedeepseek-go" >/dev/null 2>&1; then
+        echo -e "\033[1;36m[FreeDeepseek-Go]\033[0m Starting high-performance Go proxy server..."
+        (cd "$(dirname "$PROXY_BIN")" && "$PROXY_BIN" >/dev/null 2>&1 &)
+        sleep 1
     fi
     export ANTHROPIC_BASE_URL="http://localhost:9655"
-    export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-chat"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-reasoner"
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-flash"
+    export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-expert-thinking"
     export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-expert"
-    export ANTHROPIC_DEFAULT_FABLE_MODEL="deepseek-v4-pro"
+    export ANTHROPIC_DEFAULT_FABLE_MODEL="deepseek-expert-thinking"
     command claude "$@"
 }
 
 # DeepSeek Model Aliases for Claude Code
-alias claude-chat='claude --model deepseek-chat'
-alias claude-default='claude --model deepseek-default'
-alias claude-reasoner='claude --model deepseek-reasoner'
-alias claude-r1='claude --model deepseek-r1'
+alias claude-flash='claude --model deepseek-flash'
+alias claude-flash-thinking='claude --model deepseek-flash-thinking'
 alias claude-expert='claude --model deepseek-expert'
-alias claude-v4-pro='claude --model deepseek-v4-pro'
+alias claude-expert-thinking='claude --model deepseek-expert-thinking'
+alias claude-v4-pro='claude --model deepseek-expert-thinking'
 # End FreeDeepseekAPI Claude Wrapper
 EOF_BASHRC
 success "Shell wrapper and model mappings updated in ~/.bashrc."
 
-# Try to source ~/.bashrc into current process if run via source
 if [ -r "$BASHRC" ]; then
     source "$BASHRC" 2>/dev/null || true
 fi
 
-step "Installation Summary"
-info "FreeDeepseekAPI location: $INSTALL_DIR"
-
-# Step 5: Mobile DeepSeek Token Helper
-step "Mobile DeepSeek Authentication Helper / Настройка авторизации"
-
+# Step 4: Authentication Check
+step "DeepSeek Authentication Setup"
 AUTH_FILE="$INSTALL_DIR/deepseek-auth.json"
 
-if [ -f "$AUTH_FILE" ] && (grep -q '"token"' "$AUTH_FILE" 2>/dev/null || grep -q '"userToken"' "$AUTH_FILE" 2>/dev/null); then
-    success "Existing DeepSeek authentication token detected in $AUTH_FILE!"
-    wrap_inst 6 "   ℹ  " 6 "\033[38;5;242m" "To update your token in the future, edit $AUTH_FILE or delete it and re-run installer."
-    wrap_inst 6 "      " 6 "\033[38;5;242m" "(Чтобы обновить токен в будущем, отредактируйте $AUTH_FILE или удалите его и запустите установку заново)."
-else
-    # 1. Display instruction text using wrap_inst
-    draw_instruction_text
-
-    # 2. Wait for user to press Enter before opening browser
-    wrap_inst 6 "   👉 " 6 "\033[1;38;5;48m" "Read instruction above and press Enter to open chat.deepseek.com in browser..."
-    wrap_inst 6 "      " 6 "\033[38;5;242m" "Прочитайте инструкцию выше и нажмите Enter, чтобы открыть chat.deepseek.com в браузере..."
-    read -r _unused_input
-
-    echo -e ""
-    wrap_inst 6 "   ${CYAN}ℹ${RESET}  " 6 "\033[1;36m" "Opening https://chat.deepseek.com in your mobile browser..."
-    wrap_inst 6 "      " 6 "\033[38;5;242m" "Открываем https://chat.deepseek.com в мобильном браузере..."
-
-    if command -v termux-open >/dev/null 2>&1; then
-        termux-open "https://chat.deepseek.com" >/dev/null 2>&1 || true
-    fi
-
-    echo -e ""
-    wrap_inst 6 "   🔑 " 6 "\033[1;36m" "PASTE YOUR DEEPSEEK TOKEN / ВСТАВЬТЕ ВАШ DEEPSEEK TOKEN:"
-    read -p "Token/JSON: " USER_TOKEN
-
-    if [ -n "$USER_TOKEN" ]; then
-        if command -v node >/dev/null 2>&1; then
-            node -e '
-            var input = process.argv[1] || "";
-            var authFile = process.argv[2];
-
-            function extractField(key, str) {
-              var re = new RegExp("\"" + key + "\"\\s*:\\s*\"([^\"]*)\"");
-              var m = str.match(re);
-              return m ? m[1] : "";
-            }
-
-            function extractCleanToken(str) {
-              var matchVal = str.match(/"value"\s*:\s*"([^"]+)"/);
-              if (matchVal && matchVal[1]) return matchVal[1];
-
-              var matchTok = str.match(/"token"\s*:\s*"([^"]+)"/);
-              if (matchTok && matchTok[1] && !matchTok[1].includes("{")) return matchTok[1];
-
-              var cur = str;
-              for (var i = 0; i < 5; i++) {
-                try {
-                  var p = JSON.parse(cur);
-                  if (typeof p === "string") cur = p;
-                  else if (p && typeof p === "object") {
-                    if (p.value) cur = p.value;
-                    else if (p.token) cur = p.token;
-                    else break;
-                  } else break;
-                } catch(e) {
-                  break;
-                }
-              }
-              return String(cur).replace(/^["\x27\s{}]+|["\x27\s{}]+$/g, "").trim();
-            }
-
-            var token = extractCleanToken(input);
-            var cookie = extractField("cookie", input);
-            var hif_dliq = extractField("hif_dliq", input);
-            var hif_leim = extractField("hif_leim", input);
-            var wasmUrl = extractField("wasmUrl", input) || "https://fe-static.deepseek.com/chat/static/sha3_wasm_bg.7b9ca65ddd.wasm";
-
-            var authObj = {
-              token: token,
-              hif_dliq: hif_dliq,
-              hif_leim: hif_leim,
-              cookie: cookie,
-              wasmUrl: wasmUrl
-            };
-
-            require("fs").writeFileSync(authFile, JSON.stringify(authObj, null, 2));
-            ' "$USER_TOKEN" "$AUTH_FILE"
-        else
-            USER_TOKEN=$(echo "$USER_TOKEN" | tr -d '"' | tr -d "'" | tr -d ' ')
-            cat << EOF_AUTH > "$AUTH_FILE"
-{
-  "token": "$USER_TOKEN",
-  "hif_dliq": "",
-  "hif_leim": "",
-  "cookie": "",
-  "wasmUrl": "https://fe-static.deepseek.com/chat/static/sha3_wasm_bg.7b9ca65ddd.wasm"
-}
-EOF_AUTH
-        fi
-        chmod 600 "$AUTH_FILE"
-        echo -e ""
-        success "Authentication file successfully created at $AUTH_FILE!"
-    else
-        echo -e ""
-        info "No token entered. You can set up deepseek-auth.json later in $INSTALL_DIR."
-    fi
+if [ -f "$AUTH_FILE" ] && grep -q '"token"' "$AUTH_FILE" 2>/dev/null; then
+    success "Authentication token detected in $AUTH_FILE."
 fi
 
 echo -e ""
-success "Installation completed! Run 'source ~/.bashrc' (or run installer with 'source ./install_freedeepseek.sh')."
+success "Installation completed! You can now run 'claude', 'claude-flash', 'claude-expert', or 'claude-expert-thinking'."
