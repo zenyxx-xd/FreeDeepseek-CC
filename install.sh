@@ -2,7 +2,7 @@
 # ==============================================================================
 # FreeDeepseek-CC - Proxy & Claude Wrapper
 # ==============================================================================
-# Version: v2.3.2
+# Version: v2.3.3
 # ==============================================================================
 
 set -e
@@ -10,7 +10,7 @@ set -e
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-INSTALLER_VERSION="2.3.2"
+INSTALLER_VERSION="2.3.3"
 
 # ANSI Colors
 CYAN='\033[38;5;39m'
@@ -259,7 +259,7 @@ claude() {
     export ANTHROPIC_DEFAULT_HAIKU_MODEL="DeepSeek Flash"
     export ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek Pro Thinking"
     export ANTHROPIC_DEFAULT_OPUS_MODEL="DeepSeek Pro"
-    export ANTHROPIC_DEFAULT_FABLE_MODEL="DeepSeek Vision"
+    export ANTHROPIC_DEFAULT_FABLE_MODEL="DeepSeek Flash Thinking"
     command claude "\$@"
 }
 
