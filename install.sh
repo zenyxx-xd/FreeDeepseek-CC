@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# FreeDeepseek-CC - High-Performance Go Proxy & Claude Wrapper
+# FreeDeepseek-CC - Proxy & Claude Wrapper
 # ==============================================================================
-# Version: v2.3.0
+# Version: v2.3.1
 # ==============================================================================
 
 set -e
@@ -10,7 +10,7 @@ set -e
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-INSTALLER_VERSION="2.3.0"
+INSTALLER_VERSION="2.3.1"
 
 # ANSI Colors
 CYAN='\033[38;5;39m'
@@ -202,7 +202,7 @@ else
 fi
 
 # Step 3: Compile Go Binary
-step "Step 3/5: Compiling High-Performance Go Proxy Binary"
+step "Step 3/5: Compiling Go Proxy Binary"
 if [ -d "$INSTALL_DIR" ]; then
     info "Compiling freedeepseek-cc executable..."
     if [ -f "$INSTALL_DIR/main.go" ]; then
@@ -216,8 +216,8 @@ else
     error "Go binary compilation failed. Please verify Go environment."
 fi
 
-# Step 4: Configure Shell Wrapper & Aliases
-step "Step 4/5: Configuring Shell Wrapper & Model Aliases"
+# Step 4: Configure Shell Wrapper & Aliases & PATH
+step "Step 4/5: Configuring Shell Wrapper, PATH & Model Aliases"
 BASHRC="$HOME/.bashrc"
 WRAPPER_TAG="# FreeDeepseekAPI Claude Wrapper"
 
@@ -226,14 +226,32 @@ if grep -q "$WRAPPER_TAG" "$BASHRC" 2>/dev/null; then
     sed -i '/# FreeDeepseekAPI Claude Wrapper/,/# End FreeDeepseekAPI Claude Wrapper/d' "$BASHRC" 2>/dev/null || true
 fi
 
-info "Appending wrapper function and model aliases to ~/.bashrc..."
+info "Appending PATH exports, wrapper function, and model aliases to ~/.bashrc..."
 cat << EOF_BASHRC >> "$BASHRC"
 
 # FreeDeepseekAPI Claude Wrapper
+if [[ ":\$PATH:" != *":\$HOME/.local/bin:"* ]]; then
+    export PATH="\$HOME/.local/bin:\$PATH"
+fi
+if command -v npm >/dev/null 2>&1; then
+    NPM_BIN="\$(npm config get prefix 2>/dev/null)/bin"
+    if [ -n "\$NPM_BIN" ] && [[ ":\$PATH:" != *":\$NPM_BIN:"* ]]; then
+        export PATH="\$NPM_BIN:\$PATH"
+    fi
+fi
+
 claude() {
-    local PROXY_BIN="$INSTALL_DIR/freedeepseek-cc"
-    if ! pgrep -f "freedeepseek-cc" >/dev/null 2>&1; then
-        echo -e "\033[1;36m[FreeDeepseek-CC]\033[0m Starting high-performance Go proxy server..."
+    local PROXY_BIN=""
+    if [ -f "/opt/freedeepseek-cc/freedeepseek-cc" ]; then
+        PROXY_BIN="/opt/freedeepseek-cc/freedeepseek-cc"
+    elif [ -f "\$HOME/freedeepseek-cc/freedeepseek-cc" ]; then
+        PROXY_BIN="\$HOME/freedeepseek-cc/freedeepseek-cc"
+    elif [ -n "\$PREFIX" ] && [ -f "\$PREFIX/opt/freedeepseek-cc/freedeepseek-cc" ]; then
+        PROXY_BIN="\$PREFIX/opt/freedeepseek-cc/freedeepseek-cc"
+    fi
+
+    if [ -n "\$PROXY_BIN" ] && ! pgrep -f "freedeepseek-cc" >/dev/null 2>&1; then
+        echo -e "\033[1;36m[FreeDeepseek-CC]\033[0m Starting proxy server..."
         (cd "\$(dirname "\$PROXY_BIN")" && "\$PROXY_BIN" >/dev/null 2>&1 &)
         sleep 1
     fi
@@ -253,7 +271,7 @@ alias claude-pro-thinking='claude --model "DeepSeek Pro Thinking"'
 alias claude-vision='claude --model "DeepSeek Vision"'
 # End FreeDeepseekAPI Claude Wrapper
 EOF_BASHRC
-success "Shell wrapper and model aliases successfully configured in ~/.bashrc."
+success "Shell wrapper, PATH exports, and model aliases successfully configured in ~/.bashrc."
 
 if [ -r "$BASHRC" ]; then
     source "$BASHRC" 2>/dev/null || true
