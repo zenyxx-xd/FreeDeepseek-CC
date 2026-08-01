@@ -2,7 +2,7 @@
 # ==============================================================================
 # FreeDeepseek-CC - High-Performance Go Proxy & Claude Wrapper
 # ==============================================================================
-# Version: v2.2.1
+# Version: v2.3.0
 # ==============================================================================
 
 set -e
@@ -10,7 +10,7 @@ set -e
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-INSTALLER_VERSION="2.2.1"
+INSTALLER_VERSION="2.3.0"
 
 # ANSI Colors
 CYAN='\033[38;5;39m'
@@ -101,7 +101,7 @@ draw_banner() {
     }
 
     echo -e "\n${CYAN_BOLD}  ┌${hline}┐${RESET}"
-    echo -e "${CYAN_BOLD}  │ $(pad_text "${GRAY}FREE DEEPSEEK GO PROXY${RESET}" 23) ${CYAN_BOLD}│${RESET}"
+    echo -e "${CYAN_BOLD}  │ $(pad_text "${GRAY}FREE DEEPSEEK CC PROXY${RESET}" 23) ${CYAN_BOLD}│${RESET}"
     echo -e "${CYAN_BOLD}  ├${hline}┤${RESET}"
     echo -e "${CYAN_BOLD}  │ $(pad_text "${GRAY}Version        : ${RESET}${GREEN_BOLD}v${ver}" $(( 18 + ${#ver} ))) ${CYAN_BOLD}│${RESET}"
     echo -e "${CYAN_BOLD}  └${hline}┘${RESET}"
@@ -136,7 +136,14 @@ trap on_host_interrupt SIGINT SIGTERM
 clear || true
 draw_banner "$INSTALLER_VERSION"
 
-INSTALL_DIR="$HOME/freedeepseek-go"
+# Determine target installation path (/opt/freedeepseek-cc or $PREFIX/opt/freedeepseek-cc)
+if [ -w "/opt" ] || mkdir -p "/opt" 2>/dev/null; then
+    INSTALL_DIR="/opt/freedeepseek-cc"
+elif [ -n "$PREFIX" ] && [ -d "$PREFIX" ]; then
+    INSTALL_DIR="$PREFIX/opt/freedeepseek-cc"
+else
+    INSTALL_DIR="$HOME/.local/share/freedeepseek-cc"
+fi
 
 # Step 1: Check & Auto-install dependencies
 step "Step 1/5: Checking & Installing System Dependencies"
@@ -181,7 +188,7 @@ success "Required dependencies (git, golang, nodejs) are installed and ready."
 
 # Step 2: Clone / Update Repository
 step "Step 2/5: Synchronizing FreeDeepseek-CC Repository"
-info "Target directory: $INSTALL_DIR"
+info "Target installation directory: $INSTALL_DIR"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
     info "Existing repository detected. Pulling latest code..."
@@ -191,22 +198,24 @@ else
     info "Cloning https://github.com/zenyxx-xd/FreeDeepseek-CC.git into $INSTALL_DIR..."
     mkdir -p "$(dirname "$INSTALL_DIR")"
     git clone https://github.com/zenyxx-xd/FreeDeepseek-CC.git "$INSTALL_DIR" >/dev/null 2>&1 || mkdir -p "$INSTALL_DIR"
-    success "Repository synchronized."
+    success "Repository synchronized at $INSTALL_DIR."
 fi
 
 # Step 3: Compile Go Binary
 step "Step 3/5: Compiling High-Performance Go Proxy Binary"
 if [ -d "$INSTALL_DIR" ]; then
-    info "Compiling freedeepseek-go executable..."
+    info "Compiling freedeepseek-cc executable inside $INSTALL_DIR..."
     if [ -f "$INSTALL_DIR/main.go" ]; then
-        (cd "$INSTALL_DIR" && go build -o freedeepseek-go main.go >/dev/null 2>&1 || true)
+        (cd "$INSTALL_DIR" && go build -o freedeepseek-cc main.go >/dev/null 2>&1 || true)
     fi
 fi
 
-if [ -f "$INSTALL_DIR/freedeepseek-go" ]; then
-    success "Compiled binary ready at $INSTALL_DIR/freedeepseek-go."
+if [ -f "$INSTALL_DIR/freedeepseek-cc" ]; then
+    chmod +x "$INSTALL_DIR/freedeepseek-cc"
+    success "Compiled binary ready at $INSTALL_DIR/freedeepseek-cc."
 else
     error "Go binary compilation failed. Please verify Go environment."
+    exit 1
 fi
 
 # Step 4: Configure Shell Wrapper & Aliases
@@ -224,9 +233,15 @@ cat << 'EOF_BASHRC' >> "$BASHRC"
 
 # FreeDeepseekAPI Claude Wrapper
 claude() {
-    local PROXY_BIN="$HOME/freedeepseek-go/freedeepseek-go"
-    if ! pgrep -f "freedeepseek-go" >/dev/null 2>&1; then
-        echo -e "\033[1;36m[FreeDeepseek-Go]\033[0m Starting high-performance Go proxy server..."
+    local PROXY_BIN="/opt/freedeepseek-cc/freedeepseek-cc"
+    if [ -n "$PREFIX" ] && [ -d "$PREFIX" ] && [ ! -w "/opt" ]; then
+        PROXY_BIN="$PREFIX/opt/freedeepseek-cc/freedeepseek-cc"
+    fi
+    if [ ! -f "$PROXY_BIN" ]; then
+        PROXY_BIN="$HOME/.local/share/freedeepseek-cc/freedeepseek-cc"
+    fi
+    if ! pgrep -f "freedeepseek-cc" >/dev/null 2>&1; then
+        echo -e "\033[1;36m[FreeDeepseek-CC]\033[0m Starting high-performance Go proxy server..."
         (cd "$(dirname "$PROXY_BIN")" && "$PROXY_BIN" >/dev/null 2>&1 &)
         sleep 1
     fi
@@ -351,6 +366,7 @@ fi
 
 step "Installation Summary"
 info "Location: $INSTALL_DIR"
+info "Binary: $INSTALL_DIR/freedeepseek-cc"
 info "Available Aliases: claude-flash, claude-flash-thinking, claude-pro, claude-pro-thinking, claude-vision"
 
 echo -e ""

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"freedeepseek-go/proxy"
+	"freedeepseek-cc/proxy"
 )
 
 func main() {

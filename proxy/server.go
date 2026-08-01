@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"freedeepseek-go/models"
-	"freedeepseek-go/pow"
-	"freedeepseek-go/session"
+	"freedeepseek-cc/models"
+	"freedeepseek-cc/pow"
+	"freedeepseek-cc/session"
 )
 
 type AuthConfig struct {
