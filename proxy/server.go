@@ -54,12 +54,12 @@ func NewServer(baseDir string) (*Server, error) {
 func loadAuth(baseDir string) (AuthConfig, error) {
 	paths := []string{
 		filepath.Join(baseDir, "deepseek-auth.json"),
-		"/opt/freedeepseekapi/deepseek-auth.json",
+		"/opt/freedeepseek-cc/deepseek-auth.json",
 		filepath.Join(os.Getenv("HOME"), ".config", "freedeepseek", "deepseek-auth.json"),
 	}
 
 	if prefix := os.Getenv("PREFIX"); prefix != "" {
-		paths = append(paths, filepath.Join(prefix, "opt", "freedeepseekapi", "deepseek-auth.json"))
+		paths = append(paths, filepath.Join(prefix, "opt", "freedeepseek-cc", "deepseek-auth.json"))
 	}
 
 	for _, p := range paths {
@@ -83,13 +83,13 @@ func (s *Server) Start(port string) error {
 	mux.HandleFunc("/", s.handleHealth)
 
 	server := &http.Server{
-		Addr:         ":" + port,
+		Addr:         "0.0.0.0:" + port,
 		Handler:      mux,
 		ReadTimeout:  120 * time.Second,
-		WriteTimeout: 0, // Streaming responses require no write timeout
+		WriteTimeout: 0,
 	}
 
-	log.Printf("⚡ FreeDeepseek-CC Proxy server listening on http://localhost:%s", port)
+	log.Printf("⚡ FreeDeepseek-CC Proxy server listening on http://0.0.0.0:%s", port)
 	return server.ListenAndServe()
 }
 
@@ -99,19 +99,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"service": "FreeDeepseek-CC Proxy",
-		"version": "1.0.0",
+		"version": "2.5.0",
 	})
 }
 
-// Anthropic API (/v1/messages) Request Structs
+// Anthropic API Structs
 type AnthropicMessageRequest struct {
-	Model       string                 `json:"model"`
-	Messages    []AnthropicMessage     `json:"messages"`
-	System      interface{}            `json:"system,omitempty"`
-	Tools       []AnthropicTool        `json:"tools,omitempty"`
-	Stream      bool                   `json:"stream"`
-	MaxTokens   int                    `json:"max_tokens"`
-	Thinking    *AnthropicThinking     `json:"thinking,omitempty"`
+	Model        string                 `json:"model"`
+	Messages     []AnthropicMessage     `json:"messages"`
+	System       interface{}            `json:"system,omitempty"`
+	Tools        []AnthropicTool        `json:"tools,omitempty"`
+	Stream       bool                   `json:"stream"`
+	MaxTokens    int                    `json:"max_tokens"`
+	Thinking     *AnthropicThinking     `json:"thinking,omitempty"`
 	OutputConfig *AnthropicOutputConfig `json:"output_config,omitempty"`
 }
 
@@ -135,13 +135,17 @@ type AnthropicTool struct {
 	InputSchema interface{} `json:"input_schema"`
 }
 
+type DeepSeekFragment struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
 func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 1. Session tracking via x-claude-code-session-id
 	claudeSessionID := r.Header.Get("x-claude-code-session-id")
 	if claudeSessionID == "" {
 		claudeSessionID = "default-session-" + r.RemoteAddr
@@ -159,7 +163,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 2. Determine Effort and Thinking
 	effortLevel := ""
 	if req.OutputConfig != nil && req.OutputConfig.Effort != "" {
 		effortLevel = req.OutputConfig.Effort
@@ -168,11 +171,9 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	hasThinkingParam := req.Thinking != nil && req.Thinking.Type == "enabled"
 	modelCfg := models.ResolveModel(req.Model, hasThinkingParam)
 
-	// 3. Extract user prompt / delta message
 	userPrompt := s.extractPromptText(req.Messages, req.System, req.Tools)
 	userPrompt = models.ApplyEffortInstruction(effortLevel, userPrompt)
 
-	// 4. Session management (Delta vs New Session)
 	sess, exists := s.sessionManager.GetSession(claudeSessionID)
 	var deepseekSessionID string
 	var parentMessageID interface{} = nil
@@ -181,7 +182,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		deepseekSessionID = sess.DeepSeekSessionID
 		parentMessageID = sess.ParentMessageID
 	} else {
-		// Create new session on DeepSeek
 		dsSessID, err := s.createDeepSeekSession()
 		if err != nil {
 			log.Printf("Error creating DeepSeek session: %v", err)
@@ -192,7 +192,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		sess = s.sessionManager.SetSession(claudeSessionID, deepseekSessionID)
 	}
 
-	// 5. Create & Solve PoW
 	powHeader, err := s.solvePoWChallenge()
 	if err != nil {
 		log.Printf("Error solving PoW: %v", err)
@@ -200,7 +199,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 6. Send completion request to DeepSeek Web API
 	dsResp, err := s.sendDeepSeekCompletion(deepseekSessionID, parentMessageID, modelCfg, userPrompt, powHeader)
 	if err != nil {
 		log.Printf("Error during DeepSeek completion: %v", err)
@@ -216,7 +214,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 7. Stream SSE response back to Anthropic client
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -227,7 +224,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Send message_start
+	// 1. Send message_start
 	msgID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
 	s.sendSSE(w, flusher, "message_start", map[string]interface{}{
 		"type": "message_start",
@@ -243,15 +240,102 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		},
 	})
 
-	s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
-		"type":          "content_block_start",
-		"index":         0,
-		"content_block": map[string]string{"type": "text", "text": ""},
-	})
-
-	// Process DeepSeek stream lines
-	scanner := bufio.NewScanner(dsResp.Body)
+	// Stream parsing state
+	var fragments []DeepSeekFragment
+	var lastPath string
 	var finalResponseMsgID interface{} = nil
+
+	thinkingStarted := false
+	thinkingStopped := false
+	textStarted := false
+	textStopped := false
+
+	// Stream block indices:
+	// If ThinkingEnabled: Thinking Block is index 0, Text Block is index 1
+	// If ThinkingEnabled is false: Text Block is index 0
+	thinkingIndex := 0
+	textIndex := 0
+	if modelCfg.ThinkingEnabled {
+		textIndex = 1
+	}
+
+	ensureThinkingStarted := func() {
+		if modelCfg.ThinkingEnabled && !thinkingStarted {
+			thinkingStarted = true
+			s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
+				"type":          "content_block_start",
+				"index":         thinkingIndex,
+				"content_block": map[string]string{"type": "thinking", "thinking": ""},
+			})
+		}
+	}
+
+	ensureThinkingStopped := func() {
+		if thinkingStarted && !thinkingStopped {
+			thinkingStopped = true
+			s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
+				"type":  "content_block_stop",
+				"index": thinkingIndex,
+			})
+		}
+	}
+
+	ensureTextStarted := func() {
+		if modelCfg.ThinkingEnabled {
+			ensureThinkingStopped()
+		}
+		if !textStarted {
+			textStarted = true
+			s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
+				"type":          "content_block_start",
+				"index":         textIndex,
+				"content_block": map[string]string{"type": "text", "text": ""},
+			})
+		}
+	}
+
+	ensureTextStopped := func() {
+		if textStarted && !textStopped {
+			textStopped = true
+			s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
+				"type":  "content_block_stop",
+				"index": textIndex,
+			})
+		}
+	}
+
+	appendFragmentDelta := func(fragType string, textDelta string) {
+		if textDelta == "" || textDelta == "FINISHED" {
+			return
+		}
+
+		if fragType == "THINK" || fragType == "REASONING" {
+			if modelCfg.ThinkingEnabled {
+				ensureThinkingStarted()
+				s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": thinkingIndex,
+					"delta": map[string]string{
+						"type":     "thinking_delta",
+						"thinking": textDelta,
+					},
+				})
+			}
+			// If ThinkingEnabled is false, ignore reasoning steps completely!
+		} else if fragType == "RESPONSE" || fragType == "SEARCH" {
+			ensureTextStarted()
+			s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+				"type":  "content_block_delta",
+				"index": textIndex,
+				"delta": map[string]string{
+					"type": "text_delta",
+					"text": textDelta,
+				},
+			})
+		}
+	}
+
+	scanner := bufio.NewScanner(dsResp.Body)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -265,34 +349,79 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 			continue
 		}
 
-		if respMsgID, ok := dataMap["response_message_id"]; ok {
+		if respMsgID, ok := dataMap["response_message_id"]; ok && respMsgID != nil {
 			finalResponseMsgID = respMsgID
 		}
 
-		// Handle patch fragments
-		if val, ok := dataMap["v"]; ok {
-			if strVal, isStr := val.(string); isStr {
-				s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
-					"type":  "content_block_delta",
-					"index": 0,
-					"delta": map[string]string{
-						"type": "text_delta",
-						"text": strVal,
-					},
-				})
+		if p, ok := dataMap["p"].(string); ok {
+			lastPath = p
+		}
+
+		// Handle fragments array or update
+		if val, ok := dataMap["v"]; ok && val != nil {
+			// Case A: Full response object
+			if vMap, isMap := val.(map[string]interface{}); isMap {
+				if respObj, hasResp := vMap["response"].(map[string]interface{}); hasResp {
+					if msgID, hasID := respObj["message_id"]; hasID && msgID != nil {
+						finalResponseMsgID = msgID
+					}
+					if frags, hasFrags := respObj["fragments"].([]interface{}); hasFrags {
+						fragments = nil
+						for _, f := range frags {
+							if fMap, isFMap := f.(map[string]interface{}); isFMap {
+								tStr, _ := fMap["type"].(string)
+								cStr, _ := fMap["content"].(string)
+								fragments = append(fragments, DeepSeekFragment{Type: tStr, Content: cStr})
+							}
+						}
+					}
+				}
+			}
+
+			// Case B: Fragment array added
+			if lastPath == "response/fragments" {
+				if fragList, isList := val.([]interface{}); isList {
+					for _, f := range fragList {
+						if fMap, isFMap := f.(map[string]interface{}); isFMap {
+							tStr, _ := fMap["type"].(string)
+							cStr, _ := fMap["content"].(string)
+							frag := DeepSeekFragment{Type: tStr, Content: cStr}
+							fragments = append(fragments, frag)
+							appendFragmentDelta(tStr, cStr)
+						}
+					}
+				}
+			}
+
+			// Case C: Delta string to last fragment content
+			if (lastPath == "response/fragments/-1/content" || lastPath == "response/content") && typeofString(val) {
+				deltaStr := val.(string)
+				fragType := "RESPONSE"
+				if len(fragments) > 0 {
+					lastFragIndex := len(fragments) - 1
+					fragments[lastFragIndex].Content += deltaStr
+					fragType = fragments[lastFragIndex].Type
+				}
+				appendFragmentDelta(fragType, deltaStr)
 			}
 		}
 	}
 
-	// Update session parent_message_id for next turn
 	if finalResponseMsgID != nil {
 		s.sessionManager.UpdateParentMessageID(claudeSessionID, finalResponseMsgID)
 	}
 
-	s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
-		"type":  "content_block_stop",
-		"index": 0,
-	})
+	// Close open content blocks in correct order
+	if modelCfg.ThinkingEnabled && thinkingStarted && !thinkingStopped {
+		ensureThinkingStopped()
+	}
+	if textStarted && !textStopped {
+		ensureTextStopped()
+	} else if !textStarted {
+		// Ensure at least one empty text block was sent if nothing was output
+		ensureTextStarted()
+		ensureTextStopped()
+	}
 
 	s.sendSSE(w, flusher, "message_delta", map[string]interface{}{
 		"type":  "message_delta",
@@ -303,15 +432,18 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	s.sendSSE(w, flusher, "message_stop", map[string]interface{}{"type": "message_stop"})
 }
 
+func typeofString(v interface{}) bool {
+	_, ok := v.(string)
+	return ok
+}
+
 func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Request) {
-	// Simple OpenAI compatibility wrapper
 	http.Error(w, "OpenAI endpoint compatibility active", http.StatusOK)
 }
 
 func (s *Server) extractPromptText(messages []AnthropicMessage, system interface{}, tools []AnthropicTool) string {
 	var sb strings.Builder
 
-	// Add system prompt if present
 	if system != nil {
 		if sysStr, ok := system.(string); ok && sysStr != "" {
 			sb.WriteString("System: ")
@@ -320,7 +452,6 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 		}
 	}
 
-	// Extract the last user message
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
 		if msg.Role == "user" {
@@ -420,15 +551,15 @@ func (s *Server) solvePoWChallenge() (string, error) {
 
 func (s *Server) sendDeepSeekCompletion(sessionID string, parentMsgID interface{}, modelCfg models.ModelConfig, prompt string, powHeader string) (*http.Response, error) {
 	payload := map[string]interface{}{
-		"chat_session_id":  sessionID,
+		"chat_session_id":   sessionID,
 		"parent_message_id": parentMsgID,
-		"model_type":       modelCfg.ModelType,
-		"prompt":           prompt,
-		"ref_file_ids":     []interface{}{},
-		"thinking_enabled": modelCfg.ThinkingEnabled,
-		"search_enabled":   modelCfg.SearchEnabled,
-		"action":           nil,
-		"preempt":          false,
+		"model_type":        modelCfg.ModelType,
+		"prompt":            prompt,
+		"ref_file_ids":      []interface{}{},
+		"thinking_enabled":  modelCfg.ThinkingEnabled,
+		"search_enabled":    modelCfg.SearchEnabled,
+		"action":            nil,
+		"preempt":           false,
 	}
 
 	pBytes, err := json.Marshal(payload)
