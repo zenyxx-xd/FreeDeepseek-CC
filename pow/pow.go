@@ -4,19 +4,19 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 )
 
 type Challenge struct {
-	Algorithm  string  `json:"algorithm"`
-	Challenge  string  `json:"challenge"`
-	Salt       string  `json:"salt"`
-	Signature  string  `json:"signature"`
-	Difficulty int     `json:"difficulty"`
-	ExpireAt   int64   `json:"expire_at"`
-	TargetPath string  `json:"target_path"`
+	Algorithm  string `json:"algorithm"`
+	Challenge  string `json:"challenge"`
+	Salt       string `json:"salt"`
+	Signature  string `json:"signature"`
+	Difficulty int    `json:"difficulty"`
+	ExpireAt   int64  `json:"expire_at"`
+	TargetPath string `json:"target_path"`
 }
 
 type PowResponseHeader struct {
@@ -32,17 +32,48 @@ type runnerResult struct {
 	Answer int `json:"answer"`
 }
 
+func findRunnerScript(baseDir string) (string, error) {
+	candidates := []string{
+		filepath.Join(baseDir, "pow_runner.js"),
+		filepath.Join(baseDir, "wasm", "pow_runner.js"),
+		"/opt/freedeepseek-cc/pow_runner.js",
+		"/opt/freedeepseek-cc/wasm/pow_runner.js",
+		filepath.Join(os.Getenv("HOME"), "FreeDeepseek-CC", "wasm", "pow_runner.js"),
+		filepath.Join(os.Getenv("HOME"), "freedeepseek-go", "wasm", "pow_runner.js"),
+	}
+
+	if prefix := os.Getenv("PREFIX"); prefix != "" {
+		candidates = append(candidates,
+			filepath.Join(prefix, "opt", "freedeepseek-cc", "pow_runner.js"),
+			filepath.Join(prefix, "opt", "freedeepseek-cc", "wasm", "pow_runner.js"),
+		)
+	}
+
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+
+	return "", fmt.Errorf("pow_runner.js not found in candidate paths")
+}
+
 func SolvePow(challenge Challenge, scriptDir string) (string, error) {
 	chalBytes, err := json.Marshal(challenge)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal challenge: %w", err)
 	}
 
-	runnerPath := filepath.Join(scriptDir, "wasm", "pow_runner.js")
+	runnerPath, err := findRunnerScript(scriptDir)
+	if err != nil {
+		return "", err
+	}
+
 	cmd := exec.Command("node", runnerPath, string(chalBytes))
+	cmd.Dir = filepath.Dir(runnerPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("pow runner failed: %v, output: %s", err, string(output))
+		return "", fmt.Errorf("pow runner failed (%s): %v, output: %s", runnerPath, err, string(output))
 	}
 
 	var res runnerResult
@@ -61,17 +92,8 @@ func SolvePow(challenge Challenge, scriptDir string) (string, error) {
 
 	headerBytes, err := json.Marshal(headerObj)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal pow header obj: %w", err)
+		return "", fmt.Errorf("failed to marshal pow header: %w", err)
 	}
 
-	encoded := base64.StdEncoding.EncodeToString(headerBytes)
-	return encoded, nil
-}
-
-func GetBaseDir() string {
-	_, filename, _, ok := runtime.Caller(0)
-	if ok {
-		return filepath.Dir(filepath.Dir(filename))
-	}
-	return "."
+	return base64.StdEncoding.EncodeToString(headerBytes), nil
 }

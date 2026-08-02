@@ -176,6 +176,24 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	userPrompt = models.ApplyEffortInstruction(effortLevel, userPrompt)
 	log.Printf("Extracted user prompt: %q, Model: %s", userPrompt, req.Model)
 
+	logEntry := map[string]interface{}{
+		"timestamp":         time.Now().Format(time.RFC3339),
+		"session_id":        claudeSessionID,
+		"raw_model":         req.Model,
+		"resolved_model":    modelCfg.DisplayName,
+		"resolved_type":     modelCfg.ModelType,
+		"resolved_thinking": modelCfg.ThinkingEnabled,
+		"effort":            effortLevel,
+		"raw_body":          string(bodyBytes),
+		"extracted_prompt":  userPrompt,
+	}
+	if logData, err := json.Marshal(logEntry); err == nil {
+		if f, err := os.OpenFile("/tmp/claude_raw_requests.jsonl", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+			f.Write(append(logData, '\n'))
+			f.Close()
+		}
+	}
+
 	sess, exists := s.sessionManager.GetSession(claudeSessionID)
 	var deepseekSessionID string
 	var parentMessageID interface{} = nil
@@ -437,10 +455,23 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 	var sb strings.Builder
 
 	if system != nil {
-		if sysStr, ok := system.(string); ok && sysStr != "" {
-			sb.WriteString("System: ")
-			sb.WriteString(sysStr)
-			sb.WriteString("\n\n")
+		switch sys := system.(type) {
+		case string:
+			if sys != "" {
+				sb.WriteString("System: ")
+				sb.WriteString(sys)
+				sb.WriteString("\n\n")
+			}
+		case []interface{}:
+			for _, item := range sys {
+				if m, ok := item.(map[string]interface{}); ok {
+					if text, ok := m["text"].(string); ok && text != "" {
+						sb.WriteString("System: ")
+						sb.WriteString(text)
+						sb.WriteString("\n\n")
+					}
+				}
+			}
 		}
 	}
 

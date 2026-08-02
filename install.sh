@@ -272,7 +272,34 @@ alias claude-vision='claude --model "DeepSeek Vision"'
 alias claude-vision-thinking='claude --model "DeepSeek Vision Thinking"'
 # End FreeDeepseekAPI Claude Wrapper
 EOF_BASHRC
-success "Shell wrapper, PATH exports, and model aliases successfully configured in ~/.bashrc."
+# Update additionalModelOptionsCache in .claude.json for Claude Code UI menu
+if command -v node >/dev/null 2>&1; then
+    node -e '
+    const fs = require("fs");
+    const paths = [
+      process.env.HOME + "/.claude.json",
+      "/root/.claude.json",
+      "/data/data/com.termux/files/usr/var/lib/proot-distro/containers/debian/rootfs/root/.claude.json"
+    ];
+    const targetCache = [
+      { "value": "DeepSeek Pro", "label": "DeepSeek Pro", "description": "DeepSeek Expert mode" },
+      { "value": "DeepSeek Pro Thinking", "label": "DeepSeek Pro Thinking", "description": "DeepSeek Expert mode with Reasoning" },
+      { "value": "DeepSeek Flash", "label": "DeepSeek Flash", "description": "DeepSeek Fast mode" },
+      { "value": "DeepSeek Flash Thinking", "label": "DeepSeek Flash Thinking", "description": "DeepSeek Fast mode with Reasoning" },
+      { "value": "DeepSeek Vision", "label": "DeepSeek Vision", "description": "DeepSeek Vision mode" },
+      { "value": "DeepSeek Vision Thinking", "label": "DeepSeek Vision Thinking", "description": "DeepSeek Vision mode with Reasoning" }
+    ];
+    paths.forEach(p => {
+      if (fs.existsSync(p)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(p, "utf8"));
+          data.additionalModelOptionsCache = targetCache;
+          fs.writeFileSync(p, JSON.stringify(data, null, 2));
+        } catch(e){}
+      }
+    });
+    ' >/dev/null 2>&1 || true
+fi
 
 if [ -r "$BASHRC" ]; then
     source "$BASHRC" 2>/dev/null || true
