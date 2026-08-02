@@ -83,7 +83,11 @@ func ResolveModel(requestedModel string, thinkingExplicitlyEnabled bool) ModelCo
 	}
 }
 
-func ApplyEffortInstruction(effort string, prompt string) string {
+func ApplyEffortInstruction(effort string, prompt string, thinkingEnabled bool) string {
+	if !thinkingEnabled {
+		return prompt
+	}
+
 	e := strings.ToLower(strings.TrimSpace(effort))
 	var instruction string
 

@@ -173,7 +173,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	modelCfg := models.ResolveModel(req.Model, hasThinkingParam)
 
 	userPrompt := s.extractPromptText(req.Messages, req.System, req.Tools)
-	userPrompt = models.ApplyEffortInstruction(effortLevel, userPrompt)
+	userPrompt = models.ApplyEffortInstruction(effortLevel, userPrompt, modelCfg.ThinkingEnabled)
 	log.Printf("Extracted user prompt: %q, Model: %s", userPrompt, req.Model)
 
 	logEntry := map[string]interface{}{
