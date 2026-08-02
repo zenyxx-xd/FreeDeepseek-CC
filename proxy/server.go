@@ -22,6 +22,8 @@ type AuthConfig struct {
 	Token   string `json:"token"`
 	Cookie  string `json:"cookie"`
 	WasmURL string `json:"wasmUrl"`
+	HifDliq string `json:"hif_dliq"`
+	HifLeim string `json:"hif_leim"`
 }
 
 type Server struct {
@@ -83,13 +85,13 @@ func (s *Server) Start(port string) error {
 	mux.HandleFunc("/", s.handleHealth)
 
 	server := &http.Server{
-		Addr:         "0.0.0.0:" + port,
+		Addr:         ":" + port,
 		Handler:      mux,
 		ReadTimeout:  120 * time.Second,
 		WriteTimeout: 0,
 	}
 
-	log.Printf("⚡ FreeDeepseek-CC Proxy server listening on http://0.0.0.0:%s", port)
+	log.Printf("⚡ FreeDeepseek-CC Proxy server listening on http://localhost:%s", port)
 	return server.ListenAndServe()
 }
 
@@ -103,7 +105,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Anthropic API Structs
 type AnthropicMessageRequest struct {
 	Model        string                 `json:"model"`
 	Messages     []AnthropicMessage     `json:"messages"`
@@ -173,6 +174,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	userPrompt := s.extractPromptText(req.Messages, req.System, req.Tools)
 	userPrompt = models.ApplyEffortInstruction(effortLevel, userPrompt)
+	log.Printf("Extracted user prompt: %q, Model: %s", userPrompt, req.Model)
 
 	sess, exists := s.sessionManager.GetSession(claudeSessionID)
 	var deepseekSessionID string
@@ -240,7 +242,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		},
 	})
 
-	// Stream parsing state
 	var fragments []DeepSeekFragment
 	var lastPath string
 	var finalResponseMsgID interface{} = nil
@@ -250,9 +251,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	textStarted := false
 	textStopped := false
 
-	// Stream block indices:
-	// If ThinkingEnabled: Thinking Block is index 0, Text Block is index 1
-	// If ThinkingEnabled is false: Text Block is index 0
 	thinkingIndex := 0
 	textIndex := 0
 	if modelCfg.ThinkingEnabled {
@@ -321,7 +319,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 					},
 				})
 			}
-			// If ThinkingEnabled is false, ignore reasoning steps completely!
 		} else if fragType == "RESPONSE" || fragType == "SEARCH" {
 			ensureTextStarted()
 			s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
@@ -357,9 +354,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 			lastPath = p
 		}
 
-		// Handle fragments array or update
 		if val, ok := dataMap["v"]; ok && val != nil {
-			// Case A: Full response object
 			if vMap, isMap := val.(map[string]interface{}); isMap {
 				if respObj, hasResp := vMap["response"].(map[string]interface{}); hasResp {
 					if msgID, hasID := respObj["message_id"]; hasID && msgID != nil {
@@ -372,14 +367,14 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 								tStr, _ := fMap["type"].(string)
 								cStr, _ := fMap["content"].(string)
 								fragments = append(fragments, DeepSeekFragment{Type: tStr, Content: cStr})
+								appendFragmentDelta(tStr, cStr)
 							}
 						}
 					}
 				}
 			}
 
-			// Case B: Fragment array added
-			if lastPath == "response/fragments" {
+			if strings.HasSuffix(lastPath, "fragments") || lastPath == "response/fragments" {
 				if fragList, isList := val.([]interface{}); isList {
 					for _, f := range fragList {
 						if fMap, isFMap := f.(map[string]interface{}); isFMap {
@@ -393,8 +388,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 				}
 			}
 
-			// Case C: Delta string to last fragment content
-			if (lastPath == "response/fragments/-1/content" || lastPath == "response/content") && typeofString(val) {
+			if typeofString(val) {
 				deltaStr := val.(string)
 				fragType := "RESPONSE"
 				if len(fragments) > 0 {
@@ -411,14 +405,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		s.sessionManager.UpdateParentMessageID(claudeSessionID, finalResponseMsgID)
 	}
 
-	// Close open content blocks in correct order
 	if modelCfg.ThinkingEnabled && thinkingStarted && !thinkingStopped {
 		ensureThinkingStopped()
 	}
 	if textStarted && !textStopped {
 		ensureTextStopped()
 	} else if !textStarted {
-		// Ensure at least one empty text block was sent if nothing was output
 		ensureTextStarted()
 		ensureTextStopped()
 	}
@@ -481,9 +473,7 @@ func (s *Server) createDeepSeekSession() (string, error) {
 		return "", err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+s.auth.Token)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+	s.setWebHeaders(req)
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -524,9 +514,7 @@ func (s *Server) solvePoWChallenge() (string, error) {
 		return "", err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+s.auth.Token)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+	s.setWebHeaders(req)
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -547,6 +535,26 @@ func (s *Server) solvePoWChallenge() (string, error) {
 	}
 
 	return pow.SolvePow(chalRes.Data.BizData.Challenge, s.baseDir)
+}
+
+func (s *Server) setWebHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
+	req.Header.Set("x-client-platform", "web")
+	req.Header.Set("x-client-version", "2.0.0")
+	req.Header.Set("x-client-locale", "ru")
+	req.Header.Set("x-client-timezone-offset", "14400")
+	req.Header.Set("x-app-version", "2.0.0")
+	req.Header.Set("Authorization", "Bearer "+s.auth.Token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://chat.deepseek.com")
+	req.Header.Set("Referer", "https://chat.deepseek.com/")
+
+	if s.auth.HifDliq != "" {
+		req.Header.Set("x-hif-dliq", s.auth.HifDliq)
+	}
+	if s.auth.HifLeim != "" {
+		req.Header.Set("x-hif-leim", s.auth.HifLeim)
+	}
 }
 
 func (s *Server) sendDeepSeekCompletion(sessionID string, parentMsgID interface{}, modelCfg models.ModelConfig, prompt string, powHeader string) (*http.Response, error) {
@@ -572,11 +580,8 @@ func (s *Server) sendDeepSeekCompletion(sessionID string, parentMsgID interface{
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+s.auth.Token)
-	req.Header.Set("Content-Type", "application/json")
+	s.setWebHeaders(req)
 	req.Header.Set("X-DS-PoW-Response", powHeader)
-	req.Header.Set("x-client-version", "2.0.0")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
 
 	return s.httpClient.Do(req)
 }
