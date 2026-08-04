@@ -173,7 +173,28 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	modelCfg := models.ResolveModel(req.Model, hasThinkingParam)
 
 	sess, exists := s.sessionManager.GetSession(claudeSessionID)
-	isFirstTurn := (!exists || sess.ParentMessageID == nil)
+
+	modelChanged := false
+	if exists && sess.ParentMessageID != nil {
+		if sess.ModelType != modelCfg.ModelType || sess.ThinkingEnabled != modelCfg.ThinkingEnabled {
+			modelChanged = true
+			log.Printf("Model switch detected for session %s (%s/thinking=%v -> %s/thinking=%v). Quietly creating new DeepSeek session and migrating history...",
+				claudeSessionID, sess.ModelType, sess.ThinkingEnabled, modelCfg.ModelType, modelCfg.ThinkingEnabled)
+		}
+	}
+
+	isFirstTurn := (!exists || sess.ParentMessageID == nil || modelChanged)
+
+	if modelChanged {
+		newDsSessID, err := s.createDeepSeekSession()
+		if err != nil {
+			log.Printf("Error creating new DeepSeek session on model switch: %v", err)
+			http.Error(w, "DeepSeek session switch failed: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		sess = s.sessionManager.ResetForModelSwitch(claudeSessionID, newDsSessID, modelCfg.ModelType, modelCfg.ThinkingEnabled)
+		exists = true
+	}
 
 	userPrompt := s.extractPromptText(req.Messages, req.System, req.Tools, isFirstTurn)
 
@@ -198,7 +219,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	userPrompt = models.ApplyEffortInstruction(effortLevel, userPrompt, modelCfg.ThinkingEnabled)
-	log.Printf("Extracted user prompt (isFirstTurn=%v): %q, Model: %s", isFirstTurn, userPrompt, req.Model)
+	log.Printf("Extracted user prompt (isFirstTurn=%v, modelChanged=%v): %q, Model: %s", isFirstTurn, modelChanged, userPrompt, req.Model)
 
 	logEntry := map[string]interface{}{
 		"timestamp":         time.Now().Format(time.RFC3339),
@@ -232,7 +253,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		deepseekSessionID = dsSessID
-		sess = s.sessionManager.SetSession(claudeSessionID, deepseekSessionID)
+		sess = s.sessionManager.SetSession(claudeSessionID, deepseekSessionID, modelCfg.ModelType, modelCfg.ThinkingEnabled)
 	}
 
 	powHeader, err := s.solvePoWChallenge()
@@ -573,6 +594,36 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 			sb.WriteString("\n")
 		}
 		sb.WriteString("\n")
+	}
+
+	if isFirstTurn && len(messages) > 1 {
+		sb.WriteString("[Transferred Conversation History]\n")
+		for i := 0; i < len(messages)-1; i++ {
+			msg := messages[i]
+			roleTitle := "User"
+			if msg.Role == "assistant" {
+				roleTitle = "Assistant"
+			}
+			var contentStr string
+			switch c := msg.Content.(type) {
+			case string:
+				contentStr = c
+			case []interface{}:
+				var parts []string
+				for _, item := range c {
+					if m, ok := item.(map[string]interface{}); ok {
+						parts = append(parts, extractContentBlockGeneric(m))
+					} else if str, ok := item.(string); ok {
+						parts = append(parts, str)
+					}
+				}
+				contentStr = strings.Join(parts, "\n")
+			}
+			if strings.TrimSpace(contentStr) != "" {
+				sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", roleTitle, strings.TrimSpace(contentStr)))
+			}
+		}
+		sb.WriteString("[Current User Message]\n")
 	}
 
 	for i := len(messages) - 1; i >= 0; i-- {

@@ -9,6 +9,8 @@ type AgentSession struct {
 	ClaudeSessionID   string
 	DeepSeekSessionID string
 	ParentMessageID   interface{} // int64 or string or nil
+	ModelType         string
+	ThinkingEnabled   bool
 	LastUsed          time.Time
 	MessageCount      int
 }
@@ -49,17 +51,37 @@ func (sm *SessionManager) GetSession(claudeSessionID string) (*AgentSession, boo
 	return s, ok
 }
 
-func (sm *SessionManager) SetSession(claudeSessionID, deepseekSessionID string) *AgentSession {
+func (sm *SessionManager) SetSession(claudeSessionID, deepseekSessionID, modelType string, thinkingEnabled bool) *AgentSession {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	s := &AgentSession{
 		ClaudeSessionID:   claudeSessionID,
 		DeepSeekSessionID: deepseekSessionID,
 		ParentMessageID:   nil,
+		ModelType:         modelType,
+		ThinkingEnabled:   thinkingEnabled,
 		LastUsed:          time.Now(),
 		MessageCount:      0,
 	}
 	sm.sessions[claudeSessionID] = s
+	return s
+}
+
+func (sm *SessionManager) ResetForModelSwitch(claudeSessionID, newDeepSeekSessionID, modelType string, thinkingEnabled bool) *AgentSession {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	s, ok := sm.sessions[claudeSessionID]
+	if !ok {
+		s = &AgentSession{
+			ClaudeSessionID: claudeSessionID,
+		}
+		sm.sessions[claudeSessionID] = s
+	}
+	s.DeepSeekSessionID = newDeepSeekSessionID
+	s.ParentMessageID = nil
+	s.ModelType = modelType
+	s.ThinkingEnabled = thinkingEnabled
+	s.LastUsed = time.Now()
 	return s
 }
 
