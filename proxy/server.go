@@ -327,6 +327,9 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	var lastPath string
 	var finalResponseMsgID interface{} = nil
 
+	var responseBuffer strings.Builder
+	hasTools := len(req.Tools) > 0
+
 	thinkingStarted := false
 	thinkingStopped := false
 	textStarted := false
@@ -401,15 +404,19 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 				})
 			}
 		} else if fragType == "RESPONSE" || fragType == "SEARCH" {
-			ensureTextStarted()
-			s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
-				"type":  "content_block_delta",
-				"index": textIndex,
-				"delta": map[string]string{
-					"type": "text_delta",
-					"text": textDelta,
-				},
-			})
+			if hasTools {
+				responseBuffer.WriteString(textDelta)
+			} else {
+				ensureTextStarted()
+				s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": textIndex,
+					"delta": map[string]string{
+						"type": "text_delta",
+						"text": textDelta,
+					},
+				})
+			}
 		}
 	}
 
@@ -482,25 +489,127 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	stopReasonToolUse := false
+
+	if hasTools {
+		if modelCfg.ThinkingEnabled && thinkingStarted && !thinkingStopped {
+			ensureThinkingStopped()
+		}
+
+		fullText := responseBuffer.String()
+		startIdx := strings.Index(fullText, "<tool_call>")
+		endIdx := strings.Index(fullText, "</tool_call>")
+		
+		currentIndex := textIndex
+
+		if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
+			beforeText := strings.TrimSpace(fullText[:startIdx])
+			if beforeText != "" {
+				s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
+					"type":          "content_block_start",
+					"index":         currentIndex,
+					"content_block": map[string]string{"type": "text", "text": ""},
+				})
+				s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": currentIndex,
+					"delta": map[string]string{
+						"type": "text_delta",
+						"text": beforeText + "\n",
+					},
+				})
+				s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
+					"type":  "content_block_stop",
+					"index": currentIndex,
+				})
+				currentIndex++
+			}
+			
+			toolJson := fullText[startIdx+len("<tool_call>") : endIdx]
+			var toolCall map[string]interface{}
+			err := json.Unmarshal([]byte(toolJson), &toolCall)
+			if err == nil {
+				toolName, _ := toolCall["name"].(string)
+				toolArgs, _ := toolCall["arguments"].(map[string]interface{})
+				
+				toolID := fmt.Sprintf("toolu_%d", time.Now().UnixNano())
+				
+				s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
+					"type":  "content_block_start",
+					"index": currentIndex,
+					"content_block": map[string]interface{}{
+						"type": "tool_use",
+						"id":   toolID,
+						"name": toolName,
+						"input": map[string]interface{}{},
+					},
+				})
+				
+				argsBytes, _ := json.Marshal(toolArgs)
+				s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": currentIndex,
+					"delta": map[string]interface{}{
+						"type": "input_json_delta",
+						"partial_json": string(argsBytes),
+					},
+				})
+				
+				s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
+					"type":  "content_block_stop",
+					"index": currentIndex,
+				})
+				
+				stopReasonToolUse = true 
+			}
+		} 
+		
+		if !stopReasonToolUse && fullText != "" {
+			s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
+				"type":          "content_block_start",
+				"index":         currentIndex,
+				"content_block": map[string]string{"type": "text", "text": ""},
+			})
+			s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+				"type":  "content_block_delta",
+				"index": currentIndex,
+				"delta": map[string]string{
+					"type": "text_delta",
+					"text": fullText,
+				},
+			})
+			s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
+				"type":  "content_block_stop",
+				"index": currentIndex,
+			})
+		}
+	}
+
 	if finalResponseMsgID != nil {
 		s.sessionManager.UpdateParentMessageID(claudeSessionID, finalResponseMsgID)
 	} else {
 		log.Printf("Warning: no response_message_id found in DeepSeek SSE stream for session %s", claudeSessionID)
 	}
 
-	if modelCfg.ThinkingEnabled && thinkingStarted && !thinkingStopped {
-		ensureThinkingStopped()
-	}
-	if textStarted && !textStopped {
-		ensureTextStopped()
-	} else if !textStarted {
-		ensureTextStarted()
-		ensureTextStopped()
+	if !hasTools {
+		if modelCfg.ThinkingEnabled && thinkingStarted && !thinkingStopped {
+			ensureThinkingStopped()
+		}
+		if textStarted && !textStopped {
+			ensureTextStopped()
+		} else if !textStarted {
+			ensureTextStarted()
+			ensureTextStopped()
+		}
 	}
 
+	stopReason := "end_turn"
+	if stopReasonToolUse {
+		stopReason = "tool_use"
+	}
 	s.sendSSE(w, flusher, "message_delta", map[string]interface{}{
 		"type":  "message_delta",
-		"delta": map[string]interface{}{"stop_reason": "end_turn", "stop_sequence": nil},
+		"delta": map[string]interface{}{"stop_reason": stopReason, "stop_sequence": nil},
 		"usage": map[string]int{"output_tokens": 100},
 	})
 
@@ -598,6 +707,9 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 
 	if isFirstTurn && len(tools) > 0 {
 		sb.WriteString("[Available Tools]\n")
+		sb.WriteString("You have access to the following tools. To use a tool, you MUST output a JSON block wrapped in <tool_call> and </tool_call> tags. Example:\n")
+		sb.WriteString("<tool_call>\n{\"name\": \"ToolName\", \"arguments\": {\"arg1\": \"value1\"}}\n</tool_call>\n")
+		sb.WriteString("Do not output multiple tool calls in one response. Your tool call should be the last thing in your response.\n\n")
 		for _, t := range tools {
 			sb.WriteString("- ")
 			sb.WriteString(t.Name)
