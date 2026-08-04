@@ -101,7 +101,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"service": "FreeDeepseek-CC Proxy",
-		"version": "2.5.0",
+		"version": "1.0.0",
 	})
 }
 
