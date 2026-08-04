@@ -178,7 +178,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	modelChanged := false
 	isCompacted := false
-	if exists && sess.ParentMessageID != nil {
+	if exists && sess.MessageCount > 0 {
 		if sess.ModelType != modelCfg.ModelType || sess.ThinkingEnabled != modelCfg.ThinkingEnabled {
 			modelChanged = true
 			log.Printf("Model switch detected for session %s (%s/thinking=%v -> %s/thinking=%v). Quietly creating new DeepSeek session and migrating history...",
@@ -190,7 +190,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	isFirstTurn := (!exists || sess.ParentMessageID == nil || modelChanged || isCompacted)
+	isFirstTurn := (!exists || sess.MessageCount == 0 || modelChanged || isCompacted)
 
 	if modelChanged || isCompacted {
 		newDsSessID, err := s.createDeepSeekSession()
@@ -251,7 +251,19 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	if exists {
 		deepseekSessionID = sess.DeepSeekSessionID
-		parentMessageID = sess.ParentMessageID
+		if sess.ParentMessageID != nil {
+			switch v := sess.ParentMessageID.(type) {
+			case float64:
+				parentMessageID = int64(v)
+			case int64:
+				parentMessageID = v
+			case int:
+				parentMessageID = int64(v)
+			default:
+				log.Printf("Warning: unknown parentMessageID type %T, value: %v", sess.ParentMessageID, sess.ParentMessageID)
+				parentMessageID = nil
+			}
+		}
 	} else {
 		dsSessID, err := s.createDeepSeekSession()
 		if err != nil {
@@ -472,6 +484,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	if finalResponseMsgID != nil {
 		s.sessionManager.UpdateParentMessageID(claudeSessionID, finalResponseMsgID)
+	} else {
+		log.Printf("Warning: no response_message_id found in DeepSeek SSE stream for session %s", claudeSessionID)
 	}
 
 	if modelCfg.ThinkingEnabled && thinkingStarted && !thinkingStopped {
@@ -794,20 +808,19 @@ func isSuggestionRequest(userPrompt string) bool {
 }
 
 func isCompactRequest(userPrompt string, system interface{}, messages []AnthropicMessage, prevCount int) bool {
-	sysStr := stringifyValue(system)
-	combined := strings.ToLower(userPrompt + " " + sysStr)
+	promptLower := strings.ToLower(userPrompt)
 
-	if strings.Contains(combined, "/compact") ||
-		strings.Contains(combined, "compact the conversation") ||
-		strings.Contains(combined, "summarize the conversation") ||
-		strings.Contains(combined, "summary of the conversation") ||
-		strings.Contains(combined, "conversation summary") ||
-		strings.Contains(combined, "compress the context") ||
-		strings.Contains(combined, "summarize") {
+	if strings.Contains(promptLower, "/compact") ||
+		strings.Contains(promptLower, "compact the conversation") ||
+		strings.Contains(promptLower, "summarize the conversation") ||
+		strings.Contains(promptLower, "summary of the conversation") ||
+		strings.Contains(promptLower, "conversation summary") ||
+		strings.Contains(promptLower, "compress the context") ||
+		strings.Contains(promptLower, "here is a summary of the conversation") {
 		return true
 	}
 
-	if prevCount > 1 && len(messages) > 0 && len(messages) < prevCount {
+	if prevCount > 2 && len(messages) > 0 && len(messages) < prevCount-1 {
 		return true
 	}
 
