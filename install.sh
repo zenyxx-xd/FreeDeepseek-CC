@@ -2,7 +2,7 @@
 # ==============================================================================
 # FreeDeepseek-CC - Proxy & Claude Wrapper
 # ==============================================================================
-# Version: v2.6.3
+# Version: v2.6.4
 # ==============================================================================
 
 set -e
@@ -10,7 +10,7 @@ set -e
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-INSTALLER_VERSION="2.6.3"
+INSTALLER_VERSION="2.6.4"
 
 # ANSI Colors
 CYAN='\033[38;5;39m'
@@ -143,6 +143,13 @@ fi
 # Step 1: Check & Auto-install dependencies
 step "Step 1/5: Checking & Installing System Dependencies"
 
+# Add standard binary locations to PATH if not already present
+for extra_path in /usr/local/go/bin /usr/local/bin /usr/bin /bin "$PREFIX/bin" "$HOME/.local/bin"; do
+    if [ -d "$extra_path" ] && [[ ":$PATH:" != *":$extra_path:"* ]]; then
+        export PATH="$extra_path:$PATH"
+    fi
+done
+
 hash -r 2>/dev/null || true
 
 MISSING_PKGS=()
@@ -163,7 +170,16 @@ if [ ${#MISSING_PKGS[@]} -ne 0 ]; then
         pkg install -y "${MISSING_PKGS[@]}" >/dev/null 2>&1 || apt-get install -y "${MISSING_PKGS[@]}" >/dev/null 2>&1 || true
     elif command -v apt-get >/dev/null 2>&1; then
         apt-get update -y >/dev/null 2>&1 || true
-        apt-get install -y "${MISSING_PKGS[@]}" >/dev/null 2>&1 || true
+        apt-get install -y "${MISSING_PKGS[@]}" >/dev/null 2>&1 || \
+        apt-get install -y git golang-go nodejs >/dev/null 2>&1 || true
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm git go nodejs >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y git golang nodejs >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y git golang nodejs >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then
+        apk add --no-cache git go nodejs >/dev/null 2>&1 || true
     fi
     hash -r 2>/dev/null || true
 fi
@@ -175,7 +191,7 @@ if ! command -v go >/dev/null 2>&1; then STILL_MISSING+=("golang"); fi
 if ! command -v node >/dev/null 2>&1; then STILL_MISSING+=("nodejs"); fi
 
 if [ ${#STILL_MISSING[@]} -ne 0 ]; then
-    error "Failed to install missing packages: ${STILL_MISSING[*]}."
+    error "Failed to install missing packages: ${STILL_MISSING[*]}. Please install them manually using your package manager."
     exit 1
 fi
 
