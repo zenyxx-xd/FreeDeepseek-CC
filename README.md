@@ -20,25 +20,27 @@ source <(curl -fsSL https://raw.githubusercontent.com/zenyxx-xd/FreeDeepseek-CC/
 
 ---
 
-## ✨ Key Features (v2.2.0 Go Engine)
+## ✨ Key Features
 
-- ⚡ **Blazing Fast Go Engine**: Single 9MB standalone Go binary, sub-millisecond local WASM PoW solver, sub-3ms startup latency, and ultra-low RAM usage (~10MB).
-- 🔄 **Stateful Delta Protocol**: Tracks Claude Code session IDs (`x-claude-code-session-id`) and DeepSeek `chat_session_id`. Transmits **only new user turns (deltas)** + `parent_message_id`, eliminating 95% of unnecessary prompt resends!
-- 🧠 **Dynamic Effort Prompt Injection**: Automatically reads Claude Code's `output_config.effort` (`low`, `medium`, `high`, `xhigh`, `max`) and injects prompt instructions.
-- 📱 **Mobile DeepSeek Token Helper**: Includes JS bookmarklet snippet to extract auth JSON from mobile browsers.
+- ⚡ **Blazing Fast Go Engine**: Standalone Go binary, sub-millisecond local WASM PoW solver, sub-3ms startup latency, and ultra-low RAM usage (~10MB).
+- 🔄 **Stateful Delta Protocol**: Tracks Claude Code session IDs (`x-claude-code-session-id`) and DeepSeek `chat_session_id`. Transmits only new user turns (deltas) + `parent_message_id`, eliminating 95% of unnecessary prompt resends!
+- 📋 **Full System Prompt Extraction**: Supports both string and structured block arrays (`[]interface{}`) from Claude Code, ensuring all tool definitions, file editing instructions, and system reminders are preserved 100%.
+- 🧠 **Smart Effort Level Control**: Automatically maps Claude Code's `output_config.effort` (`low`, `medium`, `high`, `max`, `ultracode`) to dynamic thinking directives for Thinking models.
+- 📱 **Mobile DeepSeek Token Helper**: Includes interactive setup helper to extract auth token JSON from mobile browsers.
 
 ---
 
 ## 🎯 Supported Models & Shortcuts
 
-| Command Alias | Model Flag Passed | Mode Description |
+| Command Alias | Model Name | Description |
 | :--- | :--- | :--- |
-| `claude` | *Default (`DeepSeek Pro Thinking`)* | Standard launch |
-| `claude-flash` | `--model "DeepSeek Flash"` | Fast non-thinking chat mode |
-| `claude-flash-thinking` | `--model "DeepSeek Flash Thinking"` | Fast mode with R1 reasoning |
-| `claude-pro` | `--model "DeepSeek Pro"` | DeepSeek Web Pro mode |
-| `claude-pro-thinking` | `--model "DeepSeek Pro Thinking"` | DeepSeek Web Pro mode with R1 reasoning |
-| `claude-vision` | `--model "DeepSeek Vision"` | Image & vision understanding mode |
+| `claude` | *Default (`DeepSeek Pro Thinking`)* | Standard interactive Claude Code TUI session |
+| `claude-pro` | `DeepSeek Pro` | DeepSeek Web Expert mode (no reasoning) |
+| `claude-pro-thinking` | `DeepSeek Pro Thinking` | DeepSeek Web Expert mode with R1 reasoning |
+| `claude-flash` | `DeepSeek Flash` | DeepSeek Web Fast mode (no reasoning) |
+| `claude-flash-thinking` | `DeepSeek Flash Thinking` | DeepSeek Web Fast mode with R1 reasoning |
+| `claude-vision` | `DeepSeek Vision` | DeepSeek Web Vision mode (no reasoning) |
+| `claude-vision-thinking` | `DeepSeek Vision Thinking` | DeepSeek Web Vision mode with R1 reasoning |
 
 ---
 
