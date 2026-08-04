@@ -451,27 +451,83 @@ func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Requ
 	http.Error(w, "OpenAI endpoint compatibility active", http.StatusOK)
 }
 
+func stringifyValue(val interface{}) string {
+	if val == nil {
+		return ""
+	}
+	switch v := val.(type) {
+	case string:
+		return v
+	case []interface{}:
+		var parts []string
+		for _, item := range v {
+			if str := stringifyValue(item); str != "" {
+				parts = append(parts, str)
+			}
+		}
+		return strings.Join(parts, "\n")
+	case map[string]interface{}:
+		if text, ok := v["text"].(string); ok && text != "" {
+			return text
+		}
+		if content, ok := v["content"]; ok {
+			return stringifyValue(content)
+		}
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+		return ""
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func extractContentBlockGeneric(m map[string]interface{}) string {
+	var sb strings.Builder
+	blockType, _ := m["type"].(string)
+
+	if text, ok := m["text"].(string); ok && text != "" {
+		sb.WriteString(text)
+		sb.WriteString("\n")
+	}
+
+	switch blockType {
+	case "tool_result":
+		toolID, _ := m["tool_use_id"].(string)
+		if contentVal, exists := m["content"]; exists {
+			extracted := stringifyValue(contentVal)
+			if extracted != "" {
+				if toolID != "" {
+					sb.WriteString(fmt.Sprintf("\n[Tool Result (%s)]:\n", toolID))
+				} else {
+					sb.WriteString("\n[Tool Result]:\n")
+				}
+				sb.WriteString(extracted)
+				sb.WriteString("\n")
+			}
+		}
+	case "tool_use":
+		name, _ := m["name"].(string)
+		inputVal := m["input"]
+		inputStr := stringifyValue(inputVal)
+		sb.WriteString(fmt.Sprintf("\n[Assistant Tool Call: %s]\n%s\n", name, inputStr))
+	}
+
+	return sb.String()
+}
+
 func (s *Server) extractPromptText(messages []AnthropicMessage, system interface{}, tools []AnthropicTool) string {
 	var sb strings.Builder
 
 	if system != nil {
-		switch sys := system.(type) {
-		case string:
-			if sys != "" {
-				sb.WriteString("System: ")
-				sb.WriteString(sys)
-				sb.WriteString("\n\n")
-			}
-		case []interface{}:
-			for _, item := range sys {
-				if m, ok := item.(map[string]interface{}); ok {
-					if text, ok := m["text"].(string); ok && text != "" {
-						sb.WriteString("System: ")
-						sb.WriteString(text)
-						sb.WriteString("\n\n")
-					}
-				}
-			}
+		sysText := stringifyValue(system)
+		if sysText != "" {
+			sb.WriteString("System: ")
+			sb.WriteString(sysText)
+			sb.WriteString("\n\n")
 		}
 	}
 
@@ -483,6 +539,13 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 			if t.Description != "" {
 				sb.WriteString(": ")
 				sb.WriteString(t.Description)
+			}
+			if t.InputSchema != nil {
+				if schemaStr := stringifyValue(t.InputSchema); schemaStr != "" && schemaStr != "{}" {
+					sb.WriteString(" (Schema: ")
+					sb.WriteString(schemaStr)
+					sb.WriteString(")")
+				}
 			}
 			sb.WriteString("\n")
 		}
@@ -498,35 +561,10 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 			case []interface{}:
 				for _, item := range c {
 					if m, ok := item.(map[string]interface{}); ok {
-						blockType, _ := m["type"].(string)
-
-						if text, ok := m["text"].(string); ok && text != "" {
-							sb.WriteString(text)
-							sb.WriteString("\n")
-						}
-
-						if blockType == "tool_result" {
-							if contentVal, exists := m["content"]; exists {
-								switch cv := contentVal.(type) {
-								case string:
-									if cv != "" {
-										sb.WriteString("\n[Tool Result]:\n")
-										sb.WriteString(cv)
-										sb.WriteString("\n")
-									}
-								case []interface{}:
-									for _, subItem := range cv {
-										if subMap, ok := subItem.(map[string]interface{}); ok {
-											if subText, ok := subMap["text"].(string); ok && subText != "" {
-												sb.WriteString("\n[Tool Result]:\n")
-												sb.WriteString(subText)
-												sb.WriteString("\n")
-											}
-										}
-									}
-								}
-							}
-						}
+						sb.WriteString(extractContentBlockGeneric(m))
+					} else if str, ok := item.(string); ok {
+						sb.WriteString(str)
+						sb.WriteString("\n")
 					}
 				}
 			}
