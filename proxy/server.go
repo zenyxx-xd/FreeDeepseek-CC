@@ -175,20 +175,25 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	sess, exists := s.sessionManager.GetSession(claudeSessionID)
 
 	modelChanged := false
+	isCompacted := false
 	if exists && sess.ParentMessageID != nil {
 		if sess.ModelType != modelCfg.ModelType || sess.ThinkingEnabled != modelCfg.ThinkingEnabled {
 			modelChanged = true
 			log.Printf("Model switch detected for session %s (%s/thinking=%v -> %s/thinking=%v). Quietly creating new DeepSeek session and migrating history...",
 				claudeSessionID, sess.ModelType, sess.ThinkingEnabled, modelCfg.ModelType, modelCfg.ThinkingEnabled)
+		} else if len(req.Messages) > 0 && len(req.Messages) < sess.MessageCount-1 {
+			isCompacted = true
+			log.Printf("Conversation compaction / /compact detected for session %s (message count shrank from %d to %d). Quietly creating new DeepSeek session...",
+				claudeSessionID, sess.MessageCount, len(req.Messages))
 		}
 	}
 
-	isFirstTurn := (!exists || sess.ParentMessageID == nil || modelChanged)
+	isFirstTurn := (!exists || sess.ParentMessageID == nil || modelChanged || isCompacted)
 
-	if modelChanged {
+	if modelChanged || isCompacted {
 		newDsSessID, err := s.createDeepSeekSession()
 		if err != nil {
-			log.Printf("Error creating new DeepSeek session on model switch: %v", err)
+			log.Printf("Error creating new DeepSeek session on switch/compact: %v", err)
 			http.Error(w, "DeepSeek session switch failed: "+err.Error(), http.StatusBadGateway)
 			return
 		}
