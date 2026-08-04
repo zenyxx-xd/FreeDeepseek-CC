@@ -2,7 +2,7 @@
 # ==============================================================================
 # FreeDeepseek-CC - Proxy & Claude Wrapper
 # ==============================================================================
-# Version: v2.6.2
+# Version: v2.6.3
 # ==============================================================================
 
 set -e
@@ -10,7 +10,7 @@ set -e
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
 
-INSTALLER_VERSION="2.6.2"
+INSTALLER_VERSION="2.6.3"
 
 # ANSI Colors
 CYAN='\033[38;5;39m'
@@ -85,26 +85,21 @@ error()   { wrap_log 6 "   ${RED_BOLD}✗  Error: ${RESET}${RED_BOLD}" "      ${
 draw_banner() {
     local ver="$1"
     local term_w=$(get_cols)
-    local max_w=$((term_w - 4))
-    if [ "$max_w" -lt 24 ]; then max_w=24; fi
+    local title="FREE DEEPSEEK CC PROXY"
+    local title_len=${#title}
+    local ver_str="v${ver}"
+    local ver_len=${#ver_str}
 
-    local hline=""
-    for ((i=0; i<max_w; i++)); do hline="${hline}─"; done
+    local left_margin="  "
+    local margin_len=2
 
-    pad_text() {
-        local text="$1"; local vis_len="$2"
-        local pad_len=$(( max_w - vis_len - 2 ))
-        if [ "$pad_len" -lt 0 ]; then pad_len=0; fi
-        local pad_str=""
-        for ((i=0; i<pad_len; i++)); do pad_str="${pad_str} "; done
-        echo -n "${text}${pad_str}"
-    }
+    local pad_len=$(( term_w - margin_len - title_len - ver_len ))
+    if [ "$pad_len" -lt 2 ]; then pad_len=2; fi
 
-    echo -e "\n${CYAN_BOLD}  ┌${hline}┐${RESET}"
-    echo -e "${CYAN_BOLD}  │ $(pad_text "${GRAY}FREE DEEPSEEK CC PROXY${RESET}" 23) ${CYAN_BOLD}│${RESET}"
-    echo -e "${CYAN_BOLD}  ├${hline}┤${RESET}"
-    echo -e "${CYAN_BOLD}  │ $(pad_text "${GRAY}Version        : ${RESET}${GREEN_BOLD}v${ver}" $(( 18 + ${#ver} ))) ${CYAN_BOLD}│${RESET}"
-    echo -e "${CYAN_BOLD}  └${hline}┘${RESET}"
+    local pad_str=""
+    for ((i=0; i<pad_len; i++)); do pad_str="${pad_str} "; done
+
+    echo -e "\n${left_margin}${CYAN_BOLD}${title}${RESET}${pad_str}${GRAY}${ver_str}${RESET}\n"
 }
 
 draw_instruction_text() {
