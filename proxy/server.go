@@ -174,6 +174,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	sess, exists := s.sessionManager.GetSession(claudeSessionID)
 
+	tempPrompt := s.extractPromptText(req.Messages, req.System, req.Tools, false)
+
 	modelChanged := false
 	isCompacted := false
 	if exists && sess.ParentMessageID != nil {
@@ -181,10 +183,10 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 			modelChanged = true
 			log.Printf("Model switch detected for session %s (%s/thinking=%v -> %s/thinking=%v). Quietly creating new DeepSeek session and migrating history...",
 				claudeSessionID, sess.ModelType, sess.ThinkingEnabled, modelCfg.ModelType, modelCfg.ThinkingEnabled)
-		} else if len(req.Messages) > 0 && len(req.Messages) < sess.MessageCount-1 {
+		} else if isCompactRequest(tempPrompt, req.System, req.Messages, sess.MessageCount) {
 			isCompacted = true
-			log.Printf("Conversation compaction / /compact detected for session %s (message count shrank from %d to %d). Quietly creating new DeepSeek session...",
-				claudeSessionID, sess.MessageCount, len(req.Messages))
+			log.Printf("Conversation compaction / /compact detected for session %s. Quietly creating new DeepSeek session with summary...",
+				claudeSessionID)
 		}
 	}
 
@@ -789,6 +791,27 @@ func isTitleRequest(userPrompt string, system interface{}) bool {
 
 func isSuggestionRequest(userPrompt string) bool {
 	return strings.Contains(userPrompt, "[SUGGESTION MODE:")
+}
+
+func isCompactRequest(userPrompt string, system interface{}, messages []AnthropicMessage, prevCount int) bool {
+	sysStr := stringifyValue(system)
+	combined := strings.ToLower(userPrompt + " " + sysStr)
+
+	if strings.Contains(combined, "/compact") ||
+		strings.Contains(combined, "compact the conversation") ||
+		strings.Contains(combined, "summarize the conversation") ||
+		strings.Contains(combined, "summary of the conversation") ||
+		strings.Contains(combined, "conversation summary") ||
+		strings.Contains(combined, "compress the context") ||
+		strings.Contains(combined, "summarize") {
+		return true
+	}
+
+	if prevCount > 1 && len(messages) > 0 && len(messages) < prevCount {
+		return true
+	}
+
+	return false
 }
 
 func (s *Server) sendSyntheticTitleResponse(w http.ResponseWriter, flusher http.Flusher, stream bool) {
