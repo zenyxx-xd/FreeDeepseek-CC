@@ -475,6 +475,20 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 		}
 	}
 
+	if len(tools) > 0 {
+		sb.WriteString("[Available Tools]\n")
+		for _, t := range tools {
+			sb.WriteString("- ")
+			sb.WriteString(t.Name)
+			if t.Description != "" {
+				sb.WriteString(": ")
+				sb.WriteString(t.Description)
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
 		if msg.Role == "user" {
@@ -484,9 +498,34 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 			case []interface{}:
 				for _, item := range c {
 					if m, ok := item.(map[string]interface{}); ok {
-						if text, ok := m["text"].(string); ok {
+						blockType, _ := m["type"].(string)
+
+						if text, ok := m["text"].(string); ok && text != "" {
 							sb.WriteString(text)
 							sb.WriteString("\n")
+						}
+
+						if blockType == "tool_result" {
+							if contentVal, exists := m["content"]; exists {
+								switch cv := contentVal.(type) {
+								case string:
+									if cv != "" {
+										sb.WriteString("\n[Tool Result]:\n")
+										sb.WriteString(cv)
+										sb.WriteString("\n")
+									}
+								case []interface{}:
+									for _, subItem := range cv {
+										if subMap, ok := subItem.(map[string]interface{}); ok {
+											if subText, ok := subMap["text"].(string); ok && subText != "" {
+												sb.WriteString("\n[Tool Result]:\n")
+												sb.WriteString(subText)
+												sb.WriteString("\n")
+											}
+										}
+									}
+								}
+							}
 						}
 					}
 				}
