@@ -173,6 +173,27 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	modelCfg := models.ResolveModel(req.Model, hasThinkingParam)
 
 	userPrompt := s.extractPromptText(req.Messages, req.System, req.Tools)
+
+	flusher, _ := w.(http.Flusher)
+
+	if isInitialTestRequest(userPrompt) {
+		log.Printf("Detected session warmup 'test' request. Replying with synthetic test response.")
+		s.sendSyntheticTestResponse(w, flusher, req.Stream)
+		return
+	}
+
+	if isTitleRequest(userPrompt, req.System) {
+		log.Printf("Detected background Title Generation request. Intercepting with synthetic response.")
+		s.sendSyntheticTitleResponse(w, flusher, req.Stream)
+		return
+	}
+
+	if isSuggestionRequest(userPrompt) {
+		log.Printf("Detected background Suggestion Mode request. Intercepting with synthetic response.")
+		s.sendSyntheticEmptyResponse(w, flusher, req.Stream)
+		return
+	}
+
 	userPrompt = models.ApplyEffortInstruction(effortLevel, userPrompt, modelCfg.ThinkingEnabled)
 	log.Printf("Extracted user prompt: %q, Model: %s", userPrompt, req.Model)
 
@@ -698,4 +719,191 @@ func (s *Server) sendSSE(w http.ResponseWriter, flusher http.Flusher, eventName 
 	bytes, _ := json.Marshal(data)
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventName, string(bytes))
 	flusher.Flush()
+}
+
+func isTitleRequest(userPrompt string, system interface{}) bool {
+	sysStr := stringifyValue(system)
+	combined := strings.ToLower(userPrompt + " " + sysStr)
+	return (strings.Contains(combined, "generate a concise") && strings.Contains(combined, "title")) ||
+		strings.Contains(combined, "return json with a single \"title\" field") ||
+		strings.Contains(combined, "return json with a single 'title' field")
+}
+
+func isSuggestionRequest(userPrompt string) bool {
+	return strings.Contains(userPrompt, "[SUGGESTION MODE:")
+}
+
+func (s *Server) sendSyntheticTitleResponse(w http.ResponseWriter, flusher http.Flusher, stream bool) {
+	titleJSON := `{"title": "Claude Coding Session"}`
+
+	if !stream || flusher == nil {
+		w.Header().Set("Content-Type", "application/json")
+		resp := map[string]interface{}{
+			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"type":        "message",
+			"role":        "assistant",
+			"model":       "DeepSeek Pro",
+			"content":     []map[string]string{{"type": "text", "text": titleJSON}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]int{"input_tokens": 10, "output_tokens": 10},
+		}
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	s.sendSSE(w, flusher, "message_start", map[string]interface{}{
+		"type": "message_start",
+		"message": map[string]interface{}{
+			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"type":        "message",
+			"role":        "assistant",
+			"model":       "DeepSeek Pro",
+			"content":     []interface{}{},
+			"stop_reason": nil,
+			"usage":       map[string]int{"input_tokens": 10, "output_tokens": 10},
+		},
+	})
+
+	s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
+		"type":          "content_block_start",
+		"index":         0,
+		"content_block": map[string]string{"type": "text", "text": ""},
+	})
+
+	s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+		"type":  "content_block_delta",
+		"index": 0,
+		"delta": map[string]string{"type": "text_delta", "text": titleJSON},
+	})
+
+	s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
+		"type":  "content_block_stop",
+		"index": 0,
+	})
+
+	s.sendSSE(w, flusher, "message_delta", map[string]interface{}{
+		"type":  "message_delta",
+		"delta": map[string]interface{}{"stop_reason": "end_turn", "stop_sequence": nil},
+		"usage": map[string]int{"output_tokens": 10},
+	})
+
+	s.sendSSE(w, flusher, "message_stop", map[string]interface{}{
+		"type": "message_stop",
+	})
+}
+
+func (s *Server) sendSyntheticEmptyResponse(w http.ResponseWriter, flusher http.Flusher, stream bool) {
+	if !stream || flusher == nil {
+		w.Header().Set("Content-Type", "application/json")
+		resp := map[string]interface{}{
+			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"type":        "message",
+			"role":        "assistant",
+			"model":       "DeepSeek Pro",
+			"content":     []map[string]string{},
+			"stop_reason": "end_turn",
+			"usage":       map[string]int{"input_tokens": 10, "output_tokens": 0},
+		}
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	s.sendSSE(w, flusher, "message_start", map[string]interface{}{
+		"type": "message_start",
+		"message": map[string]interface{}{
+			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"type":        "message",
+			"role":        "assistant",
+			"model":       "DeepSeek Pro",
+			"content":     []interface{}{},
+			"stop_reason": nil,
+			"usage":       map[string]int{"input_tokens": 10, "output_tokens": 0},
+		},
+	})
+
+	s.sendSSE(w, flusher, "message_delta", map[string]interface{}{
+		"type":  "message_delta",
+		"delta": map[string]interface{}{"stop_reason": "end_turn", "stop_sequence": nil},
+		"usage": map[string]int{"output_tokens": 0},
+	})
+
+	s.sendSSE(w, flusher, "message_stop", map[string]interface{}{
+		"type": "message_stop",
+	})
+}
+
+func isInitialTestRequest(userPrompt string) bool {
+	p := strings.TrimSpace(strings.ToLower(userPrompt))
+	return p == "test" || p == "system: test"
+}
+
+func (s *Server) sendSyntheticTestResponse(w http.ResponseWriter, flusher http.Flusher, stream bool) {
+	testText := "test"
+
+	if !stream || flusher == nil {
+		w.Header().Set("Content-Type", "application/json")
+		resp := map[string]interface{}{
+			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"type":        "message",
+			"role":        "assistant",
+			"model":       "DeepSeek Pro",
+			"content":     []map[string]string{{"type": "text", "text": testText}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]int{"input_tokens": 1, "output_tokens": 1},
+		}
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	s.sendSSE(w, flusher, "message_start", map[string]interface{}{
+		"type": "message_start",
+		"message": map[string]interface{}{
+			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"type":        "message",
+			"role":        "assistant",
+			"model":       "DeepSeek Pro",
+			"content":     []interface{}{},
+			"stop_reason": nil,
+			"usage":       map[string]int{"input_tokens": 1, "output_tokens": 1},
+		},
+	})
+
+	s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
+		"type":          "content_block_start",
+		"index":         0,
+		"content_block": map[string]string{"type": "text", "text": ""},
+	})
+
+	s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+		"type":  "content_block_delta",
+		"index": 0,
+		"delta": map[string]string{"type": "text_delta", "text": testText},
+	})
+
+	s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
+		"type":  "content_block_stop",
+		"index": 0,
+	})
+
+	s.sendSSE(w, flusher, "message_delta", map[string]interface{}{
+		"type":  "message_delta",
+		"delta": map[string]interface{}{"stop_reason": "end_turn", "stop_sequence": nil},
+		"usage": map[string]int{"output_tokens": 1},
+	})
+
+	s.sendSSE(w, flusher, "message_stop", map[string]interface{}{
+		"type": "message_stop",
+	})
 }
