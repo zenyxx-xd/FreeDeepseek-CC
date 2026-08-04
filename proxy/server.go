@@ -172,7 +172,10 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	hasThinkingParam := req.Thinking != nil && req.Thinking.Type == "enabled"
 	modelCfg := models.ResolveModel(req.Model, hasThinkingParam)
 
-	userPrompt := s.extractPromptText(req.Messages, req.System, req.Tools)
+	sess, exists := s.sessionManager.GetSession(claudeSessionID)
+	isFirstTurn := (!exists || sess.ParentMessageID == nil)
+
+	userPrompt := s.extractPromptText(req.Messages, req.System, req.Tools, isFirstTurn)
 
 	flusher, _ := w.(http.Flusher)
 
@@ -195,7 +198,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	userPrompt = models.ApplyEffortInstruction(effortLevel, userPrompt, modelCfg.ThinkingEnabled)
-	log.Printf("Extracted user prompt: %q, Model: %s", userPrompt, req.Model)
+	log.Printf("Extracted user prompt (isFirstTurn=%v): %q, Model: %s", isFirstTurn, userPrompt, req.Model)
 
 	logEntry := map[string]interface{}{
 		"timestamp":         time.Now().Format(time.RFC3339),
@@ -215,7 +218,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	sess, exists := s.sessionManager.GetSession(claudeSessionID)
 	var deepseekSessionID string
 	var parentMessageID interface{} = nil
 
@@ -540,10 +542,10 @@ func extractContentBlockGeneric(m map[string]interface{}) string {
 	return sb.String()
 }
 
-func (s *Server) extractPromptText(messages []AnthropicMessage, system interface{}, tools []AnthropicTool) string {
+func (s *Server) extractPromptText(messages []AnthropicMessage, system interface{}, tools []AnthropicTool, isFirstTurn bool) string {
 	var sb strings.Builder
 
-	if system != nil {
+	if isFirstTurn && system != nil {
 		sysText := stringifyValue(system)
 		if sysText != "" {
 			sb.WriteString("System: ")
@@ -552,7 +554,7 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 		}
 	}
 
-	if len(tools) > 0 {
+	if isFirstTurn && len(tools) > 0 {
 		sb.WriteString("[Available Tools]\n")
 		for _, t := range tools {
 			sb.WriteString("- ")
@@ -842,7 +844,10 @@ func (s *Server) sendSyntheticEmptyResponse(w http.ResponseWriter, flusher http.
 
 func isInitialTestRequest(userPrompt string) bool {
 	p := strings.TrimSpace(strings.ToLower(userPrompt))
-	return p == "test" || p == "system: test"
+	if idx := strings.LastIndex(p, "\n"); idx != -1 {
+		p = strings.TrimSpace(p[idx+1:])
+	}
+	return p == "test" || p == "test." || p == "test!"
 }
 
 func (s *Server) sendSyntheticTestResponse(w http.ResponseWriter, flusher http.Flusher, stream bool) {
