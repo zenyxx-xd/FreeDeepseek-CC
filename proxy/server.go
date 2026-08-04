@@ -497,13 +497,11 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 
 		fullText := responseBuffer.String()
-		startIdx := strings.Index(fullText, "<tool_call>")
-		endIdx := strings.Index(fullText, "</tool_call>")
+		beforeText, toolName, toolArgs, found := extractToolCallFromText(fullText)
 		
 		currentIndex := textIndex
 
-		if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
-			beforeText := strings.TrimSpace(fullText[:startIdx])
+		if found {
 			if beforeText != "" {
 				s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
 					"type":          "content_block_start",
@@ -525,43 +523,35 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 				currentIndex++
 			}
 			
-			toolJson := fullText[startIdx+len("<tool_call>") : endIdx]
-			var toolCall map[string]interface{}
-			err := json.Unmarshal([]byte(toolJson), &toolCall)
-			if err == nil {
-				toolName, _ := toolCall["name"].(string)
-				toolArgs, _ := toolCall["arguments"].(map[string]interface{})
-				
-				toolID := fmt.Sprintf("toolu_%d", time.Now().UnixNano())
-				
-				s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
-					"type":  "content_block_start",
-					"index": currentIndex,
-					"content_block": map[string]interface{}{
-						"type": "tool_use",
-						"id":   toolID,
-						"name": toolName,
-						"input": map[string]interface{}{},
-					},
-				})
-				
-				argsBytes, _ := json.Marshal(toolArgs)
-				s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
-					"type":  "content_block_delta",
-					"index": currentIndex,
-					"delta": map[string]interface{}{
-						"type": "input_json_delta",
-						"partial_json": string(argsBytes),
-					},
-				})
-				
-				s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
-					"type":  "content_block_stop",
-					"index": currentIndex,
-				})
-				
-				stopReasonToolUse = true 
-			}
+			toolID := fmt.Sprintf("toolu_%d", time.Now().UnixNano())
+			
+			s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
+				"type":  "content_block_start",
+				"index": currentIndex,
+				"content_block": map[string]interface{}{
+					"type": "tool_use",
+					"id":   toolID,
+					"name": toolName,
+					"input": map[string]interface{}{},
+				},
+			})
+			
+			argsBytes, _ := json.Marshal(toolArgs)
+			s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+				"type":  "content_block_delta",
+				"index": currentIndex,
+				"delta": map[string]interface{}{
+					"type": "input_json_delta",
+					"partial_json": string(argsBytes),
+				},
+			})
+			
+			s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
+				"type":  "content_block_stop",
+				"index": currentIndex,
+			})
+			
+			stopReasonToolUse = true 
 		} 
 		
 		if !stopReasonToolUse && fullText != "" {
@@ -1115,4 +1105,107 @@ func (s *Server) sendSyntheticTestResponse(w http.ResponseWriter, flusher http.F
 	s.sendSSE(w, flusher, "message_stop", map[string]interface{}{
 		"type": "message_stop",
 	})
+}
+
+func extractToolCallFromText(fullText string) (string, string, map[string]interface{}, bool) {
+	// 1. Check for <tool_call...> ... </tool_call>
+	startTagIdx := strings.Index(fullText, "<tool_call")
+	endIdx := strings.Index(fullText, "</tool_call>")
+	if startTagIdx != -1 && endIdx != -1 && endIdx > startTagIdx {
+		before := strings.TrimSpace(fullText[:startTagIdx])
+		
+		tagCloseIdx := strings.Index(fullText[startTagIdx:], ">")
+		if tagCloseIdx != -1 {
+			tagHeader := fullText[startTagIdx : startTagIdx+tagCloseIdx]
+			jsonStr := strings.TrimSpace(fullText[startTagIdx+tagCloseIdx+1 : endIdx])
+			
+			var toolName string
+			if nameIdx := strings.Index(tagHeader, "name=\""); nameIdx != -1 {
+				nameEnd := strings.Index(tagHeader[nameIdx+6:], "\"")
+				if nameEnd != -1 {
+					toolName = tagHeader[nameIdx+6 : nameIdx+6+nameEnd]
+				}
+			}
+			
+			var args map[string]interface{}
+			var tc struct {
+				Name      string                 `json:"name"`
+				Arguments map[string]interface{} `json:"arguments"`
+				Input     map[string]interface{} `json:"input"`
+			}
+			if err := json.Unmarshal([]byte(jsonStr), &tc); err == nil {
+				if tc.Name != "" {
+					toolName = tc.Name
+				}
+				args = tc.Arguments
+				if args == nil {
+					args = tc.Input
+				}
+				if args == nil {
+					json.Unmarshal([]byte(jsonStr), &args)
+				}
+			} else {
+				json.Unmarshal([]byte(jsonStr), &args)
+			}
+			
+			if toolName != "" && args != nil {
+				return before, toolName, args, true
+			}
+		}
+	}
+
+	// 2. Check for ```json ... ``` with {"name": ...}
+	codeBlockStart := strings.Index(fullText, "```json")
+	if codeBlockStart != -1 {
+		codeBlockEnd := strings.Index(fullText[codeBlockStart+7:], "```")
+		if codeBlockEnd != -1 {
+			jsonStr := strings.TrimSpace(fullText[codeBlockStart+7 : codeBlockStart+7+codeBlockEnd])
+			var tc struct {
+				Name      string                 `json:"name"`
+				Arguments map[string]interface{} `json:"arguments"`
+				Input     map[string]interface{} `json:"input"`
+			}
+			if err := json.Unmarshal([]byte(jsonStr), &tc); err == nil && tc.Name != "" {
+				before := strings.TrimSpace(fullText[:codeBlockStart])
+				args := tc.Arguments
+				if args == nil {
+					args = tc.Input
+				}
+				if args == nil {
+					args = make(map[string]interface{})
+				}
+				return before, tc.Name, args, true
+			}
+		}
+	}
+
+	// 3. Check for {"name": ...} in text
+	jsonStart := strings.Index(fullText, "{\"name\":")
+	if jsonStart == -1 {
+		jsonStart = strings.Index(fullText, "{\n  \"name\":")
+	}
+	if jsonStart != -1 {
+		jsonEnd := strings.LastIndex(fullText, "}")
+		if jsonEnd > jsonStart {
+			jsonStr := fullText[jsonStart : jsonEnd+1]
+			var tc struct {
+				Name      string                 `json:"name"`
+				Arguments map[string]interface{} `json:"arguments"`
+				Input     map[string]interface{} `json:"input"`
+			}
+			if err := json.Unmarshal([]byte(jsonStr), &tc); err == nil && tc.Name != "" {
+				before := strings.TrimSpace(fullText[:jsonStart])
+				args := tc.Arguments
+				if args == nil {
+					args = tc.Input
+				}
+				if args == nil {
+					args = make(map[string]interface{})
+				}
+				return before, tc.Name, args, true
+			}
+		}
+	}
+
+	return "", "", nil, false
 }
