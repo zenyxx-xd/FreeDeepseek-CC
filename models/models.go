@@ -29,6 +29,20 @@ func ResolveModel(requestedModel string, thinkingExplicitlyEnabled bool) ModelCo
 			SearchEnabled:   false,
 			DisplayName:     "DeepSeek Flash Thinking",
 		}
+	case "deepseek flash search", "deepseek-flash-search", "deepseek search", "deepseek-search", "search", "websearch":
+		return ModelConfig{
+			ModelType:       "default",
+			ThinkingEnabled: thinkingExplicitlyEnabled,
+			SearchEnabled:   true,
+			DisplayName:     "DeepSeek Search",
+		}
+	case "deepseek pro search", "deepseek-pro-search", "expert-search":
+		return ModelConfig{
+			ModelType:       "expert",
+			ThinkingEnabled: thinkingExplicitlyEnabled,
+			SearchEnabled:   true,
+			DisplayName:     "DeepSeek Pro Search",
+		}
 	case "deepseek pro", "deepseek-pro", "deepseek expert", "deepseek-expert", "pro", "expert", "opus":
 		return ModelConfig{
 			ModelType:       "expert",
