@@ -283,6 +283,25 @@ alias claude-vision='claude --model "DeepSeek Vision"'
 alias claude-vision-thinking='claude --model "DeepSeek Vision Thinking"'
 # End FreeDeepseekAPI Claude Wrapper
 EOF_BASHRC
+
+if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
+    cat << 'EOF_TERMUX_WRAPPER' > "$PREFIX/bin/claude"
+#!/data/data/com.termux/files/usr/bin/env bash
+cleanup_and_exit() {
+    trap - SIGINT SIGTERM
+    echo -e "\n\033[1;38;5;221m  ┌──────────────────────────────────────────────────┐\033[0m"
+    echo -e "\033[1;38;5;221m  │ \033[38;5;242mSTATUS         : \033[0m\033[1;38;5;221mSHUTTING DOWN CLAUDE CODE       \033[1;38;5;221m│\033[0m"
+    echo -e "\033[1;38;5;221m  └──────────────────────────────────────────────────┘\033[0m\n"
+    exit 0
+}
+trap cleanup_and_exit SIGINT SIGTERM
+
+CUR_DIR="$(pwd)"
+proot-distro login debian --work-dir "$CUR_DIR" -- bash -c 'source ~/.bashrc 2>/dev/null; cd "$1" 2>/dev/null || true; shift; claude "$@"' wrapper "$CUR_DIR" "$@"
+cleanup_and_exit
+EOF_TERMUX_WRAPPER
+    chmod +x "$PREFIX/bin/claude" 2>/dev/null || true
+fi
 # Update additionalModelOptionsCache in .claude.json for Claude Code UI menu
 if command -v node >/dev/null 2>&1; then
     node -e '
