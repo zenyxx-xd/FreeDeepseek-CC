@@ -186,11 +186,17 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	modelChanged := false
 	isCompacted := false
+	isUndo := false
+
 	if exists && sess.MessageCount > 0 {
 		if sess.ModelType != modelCfg.ModelType || sess.ThinkingEnabled != modelCfg.ThinkingEnabled {
 			modelChanged = true
 			log.Printf("Model switch detected for session %s (%s/thinking=%v -> %s/thinking=%v). Resetting DeepSeek session...",
 				claudeSessionID, sess.ModelType, sess.ThinkingEnabled, modelCfg.ModelType, modelCfg.ThinkingEnabled)
+		} else if isUndoRequest(tempPrompt, req.Messages, sess.MessageCount) {
+			isUndo = true
+			log.Printf("Undo / rewind request detected for session %s (history trimmed from %d to %d msgs). Creating new DeepSeek session and transferring history up to undo point...",
+				claudeSessionID, sess.MessageCount, len(req.Messages))
 		} else if isCompactRequest(tempPrompt, req.System, req.Messages, sess.MessageCount) {
 			isCompacted = true
 			log.Printf("Conversation compaction / /compact detected for session %s. Creating fresh session with summary...",
@@ -198,12 +204,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	isFirstTurn := (!exists || sess.MessageCount == 0 || modelChanged || isCompacted)
+	isFirstTurn := (!exists || sess.MessageCount == 0 || modelChanged || isCompacted || isUndo)
 
-	if modelChanged || isCompacted {
+	if modelChanged || isCompacted || isUndo {
 		newDsSessID, err := s.createDeepSeekSession()
 		if err != nil {
-			log.Printf("Error creating new DeepSeek session on switch/compact: %v", err)
+			log.Printf("Error creating new DeepSeek session on switch/compact/undo: %v", err)
 			http.Error(w, "DeepSeek session switch failed: "+err.Error(), http.StatusBadGateway)
 			return
 		}
@@ -892,6 +898,23 @@ func isSuggestionRequest(userPrompt string) bool {
 	return strings.Contains(userPrompt, "[SUGGESTION MODE:")
 }
 
+func isUndoRequest(userPrompt string, messages []AnthropicMessage, prevCount int) bool {
+	promptLower := strings.ToLower(userPrompt)
+
+	if strings.Contains(promptLower, "/undo") ||
+		strings.Contains(promptLower, "undo the last") ||
+		strings.Contains(promptLower, "revert the last") ||
+		strings.Contains(promptLower, "rewind to") {
+		return true
+	}
+
+	if prevCount > 0 && len(messages) > 0 && len(messages) < prevCount {
+		return true
+	}
+
+	return false
+}
+
 func isCompactRequest(userPrompt string, system interface{}, messages []AnthropicMessage, prevCount int) bool {
 	promptLower := strings.ToLower(userPrompt)
 
@@ -902,10 +925,6 @@ func isCompactRequest(userPrompt string, system interface{}, messages []Anthropi
 		strings.Contains(promptLower, "conversation summary") ||
 		strings.Contains(promptLower, "compress the context") ||
 		strings.Contains(promptLower, "here is a summary of the conversation") {
-		return true
-	}
-
-	if prevCount > 2 && len(messages) > 0 && len(messages) < prevCount-1 {
 		return true
 	}
 
