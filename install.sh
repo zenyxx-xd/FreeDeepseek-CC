@@ -90,8 +90,8 @@ draw_banner() {
     local ver_str="v${ver}"
     local ver_len=${#ver_str}
 
-    local left_margin="  "
-    local margin_len=2
+    local left_margin="   "
+    local margin_len=3
 
     local pad_len=$(( term_w - margin_len - title_len - ver_len ))
     if [ "$pad_len" -lt 2 ]; then pad_len=2; fi
@@ -99,7 +99,7 @@ draw_banner() {
     local pad_str=""
     for ((i=0; i<pad_len; i++)); do pad_str="${pad_str} "; done
 
-    echo -e "\n${left_margin}${CYAN_BOLD}${title}${RESET}${pad_str}${GRAY}${ver_str}${RESET}\n"
+    echo -e "\n${left_margin}${CYAN_BOLD}${title}${RESET}${pad_str}${GRAY}${ver_str}${RESET}"
 }
 
 draw_instruction_text() {
