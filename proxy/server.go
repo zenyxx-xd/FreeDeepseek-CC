@@ -383,6 +383,9 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	toolDetected := false
+	flushedLen := 0
+
 	appendFragmentDelta := func(fragType string, textDelta string) {
 		if textDelta == "" || textDelta == "FINISHED" {
 			return
@@ -401,18 +404,38 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 				})
 			}
 		} else if fragType == "RESPONSE" || fragType == "SEARCH" {
-			if hasTools {
-				responseBuffer.WriteString(textDelta)
-			} else {
-				ensureTextStarted()
-				s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
-					"type":  "content_block_delta",
-					"index": textIndex,
-					"delta": map[string]string{
-						"type": "text_delta",
-						"text": textDelta,
-					},
-				})
+			responseBuffer.WriteString(textDelta)
+			fullText := responseBuffer.String()
+
+			if hasTools && !toolDetected {
+				if strings.Contains(fullText, "<tool_call") ||
+					strings.Contains(fullText, "```json") ||
+					strings.Contains(fullText, "{\"name\":") ||
+					strings.Contains(fullText, "{\n  \"name\":") {
+					toolDetected = true
+				}
+			}
+
+			if !toolDetected {
+				safeLen := len(fullText)
+				if hasTools {
+					if idx := strings.LastIndexAny(fullText, "<{`"); idx != -1 && idx >= flushedLen {
+						safeLen = idx
+					}
+				}
+				if safeLen > flushedLen {
+					chunk := fullText[flushedLen:safeLen]
+					flushedLen = safeLen
+					ensureTextStarted()
+					s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
+						"type":  "content_block_delta",
+						"index": textIndex,
+						"delta": map[string]string{
+							"type": "text_delta",
+							"text": chunk,
+						},
+					})
+				}
 			}
 		}
 	}
@@ -486,36 +509,34 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	stopReasonToolUse := false
+	fullText := responseBuffer.String()
 
-	if hasTools {
-		if modelCfg.ThinkingEnabled && thinkingStarted && !thinkingStopped {
+	if toolDetected && hasTools {
+		if anthropicThinkingEnabled && thinkingStarted && !thinkingStopped {
 			ensureThinkingStopped()
 		}
 
-		fullText := responseBuffer.String()
 		beforeText, toolName, toolArgs, found := extractToolCallFromText(fullText)
-
 		currentIndex := textIndex
 
 		if found {
-			if beforeText != "" {
-				s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
-					"type":          "content_block_start",
-					"index":         currentIndex,
-					"content_block": map[string]string{"type": "text", "text": ""},
-				})
+			if beforeText != "" && len(beforeText) > flushedLen {
+				unflushedBefore := beforeText[flushedLen:]
+				if !textStarted {
+					ensureTextStarted()
+				}
 				s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
 					"type":  "content_block_delta",
-					"index": currentIndex,
+					"index": textIndex,
 					"delta": map[string]string{
 						"type": "text_delta",
-						"text": beforeText + "\n",
+						"text": unflushedBefore + "\n",
 					},
 				})
-				s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
-					"type":  "content_block_stop",
-					"index": currentIndex,
-				})
+				ensureTextStopped()
+				currentIndex++
+			} else if textStarted && !textStopped {
+				ensureTextStopped()
 				currentIndex++
 			}
 
@@ -549,25 +570,29 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 			stopReasonToolUse = true
 		}
+	}
 
-		if !stopReasonToolUse && fullText != "" {
-			s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
-				"type":          "content_block_start",
-				"index":         currentIndex,
-				"content_block": map[string]string{"type": "text", "text": ""},
-			})
+	if !stopReasonToolUse {
+		if len(fullText) > flushedLen {
+			remainder := fullText[flushedLen:]
+			ensureTextStarted()
 			s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
 				"type":  "content_block_delta",
-				"index": currentIndex,
+				"index": textIndex,
 				"delta": map[string]string{
 					"type": "text_delta",
-					"text": fullText,
+					"text": remainder,
 				},
 			})
-			s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
-				"type":  "content_block_stop",
-				"index": currentIndex,
-			})
+		}
+		if anthropicThinkingEnabled && thinkingStarted && !thinkingStopped {
+			ensureThinkingStopped()
+		}
+		if textStarted && !textStopped {
+			ensureTextStopped()
+		} else if !textStarted {
+			ensureTextStarted()
+			ensureTextStopped()
 		}
 	}
 
