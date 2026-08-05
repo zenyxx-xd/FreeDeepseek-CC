@@ -53,6 +53,27 @@ func NewSessionManager() *SessionManager {
 	return sm
 }
 
+func (sm *SessionManager) GetLastActiveSession() *AgentSession {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	var lastSess *AgentSession
+	var maxTime int64 = 0
+
+	for _, s := range sm.sessions {
+		t := s.lastUsedUnix.Load()
+		if t > maxTime {
+			maxTime = t
+			lastSess = s
+		}
+	}
+
+	if lastSess != nil && (time.Now().UnixNano()-maxTime) < int64(120*time.Second) {
+		return lastSess
+	}
+	return nil
+}
+
 func (sm *SessionManager) GetSession(claudeSessionID string) (*AgentSession, bool) {
 	sm.mu.RLock()
 	s, ok := sm.sessions[claudeSessionID]

@@ -157,7 +157,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	claudeSessionID := r.Header.Get("x-claude-code-session-id")
 	if claudeSessionID == "" {
-		claudeSessionID = "default-session-" + r.RemoteAddr
+		claudeSessionID = r.Header.Get("X-Claude-Code-Session-Id")
 	}
 
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -172,6 +172,29 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	isToolTurn := false
+	for _, m := range req.Messages {
+		if blocks, ok := m.Content.([]interface{}); ok {
+			for _, b := range blocks {
+				if bMap, isMap := b.(map[string]interface{}); isMap {
+					if t, _ := bMap["type"].(string); t == "tool_result" || t == "tool_use" {
+						isToolTurn = true
+					}
+				}
+			}
+		}
+	}
+
+	if claudeSessionID == "" || isToolTurn {
+		if lastSess := s.sessionManager.GetLastActiveSession(); lastSess != nil {
+			claudeSessionID = lastSess.ClaudeSessionID
+		}
+	}
+
+	if claudeSessionID == "" {
+		claudeSessionID = "default-session"
+	}
+
 	effortLevel := ""
 	if req.OutputConfig != nil && req.OutputConfig.Effort != "" {
 		effortLevel = req.OutputConfig.Effort
@@ -183,6 +206,14 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	sess, exists := s.sessionManager.GetSession(claudeSessionID)
 
 	tempPrompt := s.extractPromptText(req.Messages, req.System, req.Tools, false)
+
+	promptLower := strings.ToLower(tempPrompt)
+	if strings.Contains(promptLower, "найди") ||
+		strings.Contains(promptLower, "поищи") ||
+		strings.Contains(promptLower, "search") ||
+		strings.Contains(promptLower, "web_search") {
+		modelCfg.SearchEnabled = true
+	}
 
 	modelChanged := false
 	isCompacted := false
