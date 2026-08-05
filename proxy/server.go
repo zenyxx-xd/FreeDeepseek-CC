@@ -701,9 +701,17 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 		sb.WriteString("\n")
 	}
 
-	if isFirstTurn && len(messages) > 1 {
-		sb.WriteString("[Transferred Conversation History]\n")
-		for i := 0; i < len(messages)-1; i++ {
+	lastUserIdx := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			lastUserIdx = i
+			break
+		}
+	}
+
+	if isFirstTurn && lastUserIdx > 0 {
+		var histSb strings.Builder
+		for i := 0; i < lastUserIdx; i++ {
 			msg := messages[i]
 			roleTitle := "User"
 			if msg.Role == "assistant" {
@@ -725,29 +733,31 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 				contentStr = strings.Join(parts, "\n")
 			}
 			if strings.TrimSpace(contentStr) != "" {
-				sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", roleTitle, strings.TrimSpace(contentStr)))
+				histSb.WriteString(fmt.Sprintf("[%s]: %s\n\n", roleTitle, strings.TrimSpace(contentStr)))
 			}
 		}
-		sb.WriteString("[Current User Message]\n")
+
+		if histSb.Len() > 0 {
+			sb.WriteString("[Transferred Conversation History]\n")
+			sb.WriteString(histSb.String())
+			sb.WriteString("[Current User Message]\n")
+		}
 	}
 
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.Role == "user" {
-			switch c := msg.Content.(type) {
-			case string:
-				sb.WriteString(c)
-			case []interface{}:
-				for _, item := range c {
-					if m, ok := item.(map[string]interface{}); ok {
-						sb.WriteString(extractContentBlockGeneric(m))
-					} else if str, ok := item.(string); ok {
-						sb.WriteString(str)
-						sb.WriteString("\n")
-					}
+	if lastUserIdx != -1 {
+		msg := messages[lastUserIdx]
+		switch c := msg.Content.(type) {
+		case string:
+			sb.WriteString(c)
+		case []interface{}:
+			for _, item := range c {
+				if m, ok := item.(map[string]interface{}); ok {
+					sb.WriteString(extractContentBlockGeneric(m))
+				} else if str, ok := item.(string); ok {
+					sb.WriteString(str)
+					sb.WriteString("\n")
 				}
 			}
-			break
 		}
 	}
 
