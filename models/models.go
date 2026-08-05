@@ -33,14 +33,14 @@ func ResolveModel(requestedModel string, thinkingExplicitlyEnabled bool) ModelCo
 		return ModelConfig{
 			ModelType:       "default",
 			ThinkingEnabled: thinkingExplicitlyEnabled,
-			SearchEnabled:   true,
+			SearchEnabled:   false,
 			DisplayName:     "DeepSeek Search",
 		}
 	case "deepseek pro search", "deepseek-pro-search", "expert-search":
 		return ModelConfig{
 			ModelType:       "expert",
 			ThinkingEnabled: thinkingExplicitlyEnabled,
-			SearchEnabled:   true,
+			SearchEnabled:   false,
 			DisplayName:     "DeepSeek Pro Search",
 		}
 	case "deepseek pro", "deepseek-pro", "deepseek expert", "deepseek-expert", "pro", "expert", "opus":

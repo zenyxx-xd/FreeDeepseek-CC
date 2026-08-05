@@ -180,13 +180,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	hasThinkingParam := req.Thinking != nil && req.Thinking.Type == "enabled"
 	modelCfg := models.ResolveModel(req.Model, hasThinkingParam)
 
-	for _, t := range req.Tools {
-		if strings.EqualFold(t.Name, "web_search") || strings.EqualFold(t.Name, "websearch") {
-			modelCfg.SearchEnabled = true
-			break
-		}
-	}
-
 	sess, exists := s.sessionManager.GetSession(claudeSessionID)
 
 	tempPrompt := s.extractPromptText(req.Messages, req.System, req.Tools, false)
