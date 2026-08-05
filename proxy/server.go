@@ -11,12 +11,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"freedeepseek-cc/models"
 	"freedeepseek-cc/pow"
 	"freedeepseek-cc/session"
 )
+
+var msgCounter atomic.Uint64
+
+func generateMsgID() string {
+	return fmt.Sprintf("msg_%d_%d", time.Now().UnixNano(), msgCounter.Add(1))
+}
 
 type AuthConfig struct {
 	Token   string `json:"token"`
@@ -40,16 +47,17 @@ func NewServer(baseDir string) (*Server, error) {
 	}
 
 	transport := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 20,
-		IdleConnTimeout:     90 * time.Second,
+		MaxIdleConns:        200,
+		MaxIdleConnsPerHost: 50,
+		IdleConnTimeout:     120 * time.Second,
+		ForceAttemptHTTP2:   true,
 	}
 
 	return &Server{
 		auth:           auth,
 		sessionManager: session.NewSessionManager(),
 		baseDir:        baseDir,
-		httpClient:     &http.Client{Transport: transport},
+		httpClient:     &http.Client{Transport: transport, Timeout: 300 * time.Second},
 	}, nil
 }
 
@@ -87,7 +95,7 @@ func (s *Server) Start(port string) error {
 	server := &http.Server{
 		Addr:         ":" + port,
 		Handler:      mux,
-		ReadTimeout:  120 * time.Second,
+		ReadTimeout:  300 * time.Second,
 		WriteTimeout: 0,
 	}
 
@@ -181,11 +189,11 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if exists && sess.MessageCount > 0 {
 		if sess.ModelType != modelCfg.ModelType || sess.ThinkingEnabled != modelCfg.ThinkingEnabled {
 			modelChanged = true
-			log.Printf("Model switch detected for session %s (%s/thinking=%v -> %s/thinking=%v). Quietly creating new DeepSeek session and migrating history...",
+			log.Printf("Model switch detected for session %s (%s/thinking=%v -> %s/thinking=%v). Resetting DeepSeek session...",
 				claudeSessionID, sess.ModelType, sess.ThinkingEnabled, modelCfg.ModelType, modelCfg.ThinkingEnabled)
 		} else if isCompactRequest(tempPrompt, req.System, req.Messages, sess.MessageCount) {
 			isCompacted = true
-			log.Printf("Conversation compaction / /compact detected for session %s. Quietly creating new DeepSeek session with summary...",
+			log.Printf("Conversation compaction / /compact detected for session %s. Creating fresh session with summary...",
 				claudeSessionID)
 		}
 	}
@@ -228,24 +236,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	userPrompt = models.ApplyEffortInstruction(effortLevel, userPrompt, modelCfg.ThinkingEnabled)
 	log.Printf("Extracted user prompt (isFirstTurn=%v, modelChanged=%v): %q, Model: %s", isFirstTurn, modelChanged, userPrompt, req.Model)
 
-	logEntry := map[string]interface{}{
-		"timestamp":         time.Now().Format(time.RFC3339),
-		"session_id":        claudeSessionID,
-		"raw_model":         req.Model,
-		"resolved_model":    modelCfg.DisplayName,
-		"resolved_type":     modelCfg.ModelType,
-		"resolved_thinking": modelCfg.ThinkingEnabled,
-		"effort":            effortLevel,
-		"raw_body":          string(bodyBytes),
-		"extracted_prompt":  userPrompt,
-	}
-	if logData, err := json.Marshal(logEntry); err == nil {
-		if f, err := os.OpenFile("/tmp/claude_raw_requests.jsonl", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			f.Write(append(logData, '\n'))
-			f.Close()
-		}
-	}
-
 	var deepseekSessionID string
 	var parentMessageID interface{} = nil
 
@@ -260,7 +250,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 			case int:
 				parentMessageID = int64(v)
 			default:
-				log.Printf("Warning: unknown parentMessageID type %T, value: %v", sess.ParentMessageID, sess.ParentMessageID)
 				parentMessageID = nil
 			}
 		}
@@ -301,14 +290,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	// 1. Send message_start
-	msgID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
+	msgID := generateMsgID()
 	s.sendSSE(w, flusher, "message_start", map[string]interface{}{
 		"type": "message_start",
 		"message": map[string]interface{}{
@@ -421,6 +403,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	scanner := bufio.NewScanner(dsResp.Body)
+	// Buffer up to 10MB to avoid bufio.ErrTooLong on massive SSE payloads
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -476,15 +460,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 				}
 			}
 
-			if typeofString(val) {
-				deltaStr := val.(string)
+			if str, ok := val.(string); ok {
 				fragType := "RESPONSE"
 				if len(fragments) > 0 {
-					lastFragIndex := len(fragments) - 1
-					fragments[lastFragIndex].Content += deltaStr
-					fragType = fragments[lastFragIndex].Type
+					fragType = fragments[len(fragments)-1].Type
 				}
-				appendFragmentDelta(fragType, deltaStr)
+				appendFragmentDelta(fragType, str)
 			}
 		}
 	}
@@ -498,7 +479,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 		fullText := responseBuffer.String()
 		beforeText, toolName, toolArgs, found := extractToolCallFromText(fullText)
-		
+
 		currentIndex := textIndex
 
 		if found {
@@ -522,38 +503,38 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 				})
 				currentIndex++
 			}
-			
+
 			toolID := fmt.Sprintf("toolu_%d", time.Now().UnixNano())
-			
+
 			s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
 				"type":  "content_block_start",
 				"index": currentIndex,
 				"content_block": map[string]interface{}{
-					"type": "tool_use",
-					"id":   toolID,
-					"name": toolName,
+					"type":  "tool_use",
+					"id":    toolID,
+					"name":  toolName,
 					"input": map[string]interface{}{},
 				},
 			})
-			
+
 			argsBytes, _ := json.Marshal(toolArgs)
 			s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
 				"type":  "content_block_delta",
 				"index": currentIndex,
 				"delta": map[string]interface{}{
-					"type": "input_json_delta",
+					"type":         "input_json_delta",
 					"partial_json": string(argsBytes),
 				},
 			})
-			
+
 			s.sendSSE(w, flusher, "content_block_stop", map[string]interface{}{
 				"type":  "content_block_stop",
 				"index": currentIndex,
 			})
-			
-			stopReasonToolUse = true 
-		} 
-		
+
+			stopReasonToolUse = true
+		}
+
 		if !stopReasonToolUse && fullText != "" {
 			s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
 				"type":          "content_block_start",
@@ -577,8 +558,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	if finalResponseMsgID != nil {
 		s.sessionManager.UpdateParentMessageID(claudeSessionID, finalResponseMsgID)
-	} else {
-		log.Printf("Warning: no response_message_id found in DeepSeek SSE stream for session %s", claudeSessionID)
 	}
 
 	if !hasTools {
@@ -604,11 +583,6 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	})
 
 	s.sendSSE(w, flusher, "message_stop", map[string]interface{}{"type": "message_stop"})
-}
-
-func typeofString(v interface{}) bool {
-	_, ok := v.(string)
-	return ok
 }
 
 func (s *Server) handleOpenAIChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -892,9 +866,18 @@ func (s *Server) sendDeepSeekCompletion(sessionID string, parentMsgID interface{
 }
 
 func (s *Server) sendSSE(w http.ResponseWriter, flusher http.Flusher, eventName string, data map[string]interface{}) {
-	bytes, _ := json.Marshal(data)
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventName, string(bytes))
-	flusher.Flush()
+	b, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	w.Write([]byte("event: "))
+	w.Write([]byte(eventName))
+	w.Write([]byte("\ndata: "))
+	w.Write(b)
+	w.Write([]byte("\n\n"))
+	if flusher != nil {
+		flusher.Flush()
+	}
 }
 
 func isTitleRequest(userPrompt string, system interface{}) bool {
@@ -935,7 +918,7 @@ func (s *Server) sendSyntheticTitleResponse(w http.ResponseWriter, flusher http.
 	if !stream || flusher == nil {
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]interface{}{
-			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"id":          generateMsgID(),
 			"type":        "message",
 			"role":        "assistant",
 			"model":       "DeepSeek Pro",
@@ -954,7 +937,7 @@ func (s *Server) sendSyntheticTitleResponse(w http.ResponseWriter, flusher http.
 	s.sendSSE(w, flusher, "message_start", map[string]interface{}{
 		"type": "message_start",
 		"message": map[string]interface{}{
-			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"id":          generateMsgID(),
 			"type":        "message",
 			"role":        "assistant",
 			"model":       "DeepSeek Pro",
@@ -996,7 +979,7 @@ func (s *Server) sendSyntheticEmptyResponse(w http.ResponseWriter, flusher http.
 	if !stream || flusher == nil {
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]interface{}{
-			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"id":          generateMsgID(),
 			"type":        "message",
 			"role":        "assistant",
 			"model":       "DeepSeek Pro",
@@ -1015,7 +998,7 @@ func (s *Server) sendSyntheticEmptyResponse(w http.ResponseWriter, flusher http.
 	s.sendSSE(w, flusher, "message_start", map[string]interface{}{
 		"type": "message_start",
 		"message": map[string]interface{}{
-			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"id":          generateMsgID(),
 			"type":        "message",
 			"role":        "assistant",
 			"model":       "DeepSeek Pro",
@@ -1050,7 +1033,7 @@ func (s *Server) sendSyntheticTestResponse(w http.ResponseWriter, flusher http.F
 	if !stream || flusher == nil {
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]interface{}{
-			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"id":          generateMsgID(),
 			"type":        "message",
 			"role":        "assistant",
 			"model":       "DeepSeek Pro",
@@ -1069,7 +1052,7 @@ func (s *Server) sendSyntheticTestResponse(w http.ResponseWriter, flusher http.F
 	s.sendSSE(w, flusher, "message_start", map[string]interface{}{
 		"type": "message_start",
 		"message": map[string]interface{}{
-			"id":          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+			"id":          generateMsgID(),
 			"type":        "message",
 			"role":        "assistant",
 			"model":       "DeepSeek Pro",
@@ -1113,12 +1096,12 @@ func extractToolCallFromText(fullText string) (string, string, map[string]interf
 	endIdx := strings.Index(fullText, "</tool_call>")
 	if startTagIdx != -1 && endIdx != -1 && endIdx > startTagIdx {
 		before := strings.TrimSpace(fullText[:startTagIdx])
-		
+
 		tagCloseIdx := strings.Index(fullText[startTagIdx:], ">")
 		if tagCloseIdx != -1 {
 			tagHeader := fullText[startTagIdx : startTagIdx+tagCloseIdx]
 			jsonStr := strings.TrimSpace(fullText[startTagIdx+tagCloseIdx+1 : endIdx])
-			
+
 			var toolName string
 			if nameIdx := strings.Index(tagHeader, "name=\""); nameIdx != -1 {
 				nameEnd := strings.Index(tagHeader[nameIdx+6:], "\"")
@@ -1126,7 +1109,7 @@ func extractToolCallFromText(fullText string) (string, string, map[string]interf
 					toolName = tagHeader[nameIdx+6 : nameIdx+6+nameEnd]
 				}
 			}
-			
+
 			var args map[string]interface{}
 			var tc struct {
 				Name      string                 `json:"name"`
@@ -1142,12 +1125,12 @@ func extractToolCallFromText(fullText string) (string, string, map[string]interf
 					args = tc.Input
 				}
 				if args == nil {
-					json.Unmarshal([]byte(jsonStr), &args)
+					_ = json.Unmarshal([]byte(jsonStr), &args)
 				}
 			} else {
-				json.Unmarshal([]byte(jsonStr), &args)
+				_ = json.Unmarshal([]byte(jsonStr), &args)
 			}
-			
+
 			if toolName != "" && args != nil {
 				return before, toolName, args, true
 			}

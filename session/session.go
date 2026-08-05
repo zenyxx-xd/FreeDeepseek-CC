@@ -2,6 +2,7 @@ package session
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -11,8 +12,16 @@ type AgentSession struct {
 	ParentMessageID   interface{} // int64 or string or nil
 	ModelType         string
 	ThinkingEnabled   bool
-	LastUsed          time.Time
+	lastUsedUnix      atomic.Int64
 	MessageCount      int
+}
+
+func (s *AgentSession) GetLastUsed() time.Time {
+	return time.Unix(0, s.lastUsedUnix.Load())
+}
+
+func (s *AgentSession) Touch() {
+	s.lastUsedUnix.Store(time.Now().UnixNano())
 }
 
 type SessionManager struct {
@@ -26,12 +35,14 @@ func NewSessionManager() *SessionManager {
 	}
 	// Background cleanup of inactive sessions older than 2 hours
 	go func() {
-		for {
-			time.Sleep(10 * time.Minute)
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
 			sm.mu.Lock()
-			now := time.Now()
+			now := time.Now().UnixNano()
+			twoHoursNano := int64(2 * time.Hour)
 			for k, s := range sm.sessions {
-				if now.Sub(s.LastUsed) > 2*time.Hour {
+				if now-s.lastUsedUnix.Load() > twoHoursNano {
 					delete(sm.sessions, k)
 				}
 			}
@@ -43,10 +54,11 @@ func NewSessionManager() *SessionManager {
 
 func (sm *SessionManager) GetSession(claudeSessionID string) (*AgentSession, bool) {
 	sm.mu.RLock()
-	defer sm.mu.RUnlock()
 	s, ok := sm.sessions[claudeSessionID]
+	sm.mu.RUnlock()
+
 	if ok {
-		s.LastUsed = time.Now()
+		s.Touch()
 	}
 	return s, ok
 }
@@ -60,9 +72,9 @@ func (sm *SessionManager) SetSession(claudeSessionID, deepseekSessionID, modelTy
 		ParentMessageID:   nil,
 		ModelType:         modelType,
 		ThinkingEnabled:   thinkingEnabled,
-		LastUsed:          time.Now(),
 		MessageCount:      0,
 	}
+	s.Touch()
 	sm.sessions[claudeSessionID] = s
 	return s
 }
@@ -81,7 +93,8 @@ func (sm *SessionManager) ResetForModelSwitch(claudeSessionID, newDeepSeekSessio
 	s.ParentMessageID = nil
 	s.ModelType = modelType
 	s.ThinkingEnabled = thinkingEnabled
-	s.LastUsed = time.Now()
+	s.MessageCount = 0
+	s.Touch()
 	return s
 }
 
@@ -91,7 +104,7 @@ func (sm *SessionManager) UpdateParentMessageID(claudeSessionID string, parentMs
 	if s, ok := sm.sessions[claudeSessionID]; ok {
 		s.ParentMessageID = parentMsgID
 		s.MessageCount++
-		s.LastUsed = time.Now()
+		s.Touch()
 	}
 }
 

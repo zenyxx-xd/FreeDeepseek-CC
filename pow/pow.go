@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 )
 
 type Challenge struct {
@@ -32,30 +33,40 @@ type runnerResult struct {
 	Answer int `json:"answer"`
 }
 
+var (
+	cachedRunnerPath string
+	runnerOnce       sync.Once
+	runnerErr        error
+)
+
 func findRunnerScript(baseDir string) (string, error) {
-	candidates := []string{
-		filepath.Join(baseDir, "pow_runner.js"),
-		filepath.Join(baseDir, "wasm", "pow_runner.js"),
-		"/opt/freedeepseek-cc/pow_runner.js",
-		"/opt/freedeepseek-cc/wasm/pow_runner.js",
-		filepath.Join(os.Getenv("HOME"), "FreeDeepseek-CC", "wasm", "pow_runner.js"),
-		filepath.Join(os.Getenv("HOME"), "freedeepseek-go", "wasm", "pow_runner.js"),
-	}
-
-	if prefix := os.Getenv("PREFIX"); prefix != "" {
-		candidates = append(candidates,
-			filepath.Join(prefix, "opt", "freedeepseek-cc", "pow_runner.js"),
-			filepath.Join(prefix, "opt", "freedeepseek-cc", "wasm", "pow_runner.js"),
-		)
-	}
-
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
+	runnerOnce.Do(func() {
+		candidates := []string{
+			filepath.Join(baseDir, "pow_runner.js"),
+			filepath.Join(baseDir, "wasm", "pow_runner.js"),
+			"/opt/freedeepseek-cc/pow_runner.js",
+			"/opt/freedeepseek-cc/wasm/pow_runner.js",
+			filepath.Join(os.Getenv("HOME"), "FreeDeepseek-CC", "wasm", "pow_runner.js"),
 		}
-	}
 
-	return "", fmt.Errorf("pow_runner.js not found in candidate paths")
+		if prefix := os.Getenv("PREFIX"); prefix != "" {
+			candidates = append(candidates,
+				filepath.Join(prefix, "opt", "freedeepseek-cc", "pow_runner.js"),
+				filepath.Join(prefix, "opt", "freedeepseek-cc", "wasm", "pow_runner.js"),
+			)
+		}
+
+		for _, c := range candidates {
+			if _, err := os.Stat(c); err == nil {
+				cachedRunnerPath = c
+				return
+			}
+		}
+
+		runnerErr = fmt.Errorf("pow_runner.js not found in candidate paths")
+	})
+
+	return cachedRunnerPath, runnerErr
 }
 
 func SolvePow(challenge Challenge, scriptDir string) (string, error) {
