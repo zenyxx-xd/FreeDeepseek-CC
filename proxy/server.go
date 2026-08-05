@@ -711,6 +711,19 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 
 	if isFirstTurn && lastUserIdx > 0 {
 		var histSb strings.Builder
+		var currentRole string
+		var currentContent []string
+
+		flushBlock := func() {
+			if currentRole != "" && len(currentContent) > 0 {
+				joined := strings.TrimSpace(strings.Join(currentContent, "\n\n"))
+				if joined != "" {
+					histSb.WriteString(fmt.Sprintf("[%s]: %s\n\n", currentRole, joined))
+				}
+				currentContent = nil
+			}
+		}
+
 		for i := 0; i < lastUserIdx; i++ {
 			msg := messages[i]
 			roleTitle := "User"
@@ -732,10 +745,17 @@ func (s *Server) extractPromptText(messages []AnthropicMessage, system interface
 				}
 				contentStr = strings.Join(parts, "\n")
 			}
-			if strings.TrimSpace(contentStr) != "" {
-				histSb.WriteString(fmt.Sprintf("[%s]: %s\n\n", roleTitle, strings.TrimSpace(contentStr)))
+
+			trimmed := strings.TrimSpace(contentStr)
+			if trimmed != "" {
+				if roleTitle != currentRole {
+					flushBlock()
+					currentRole = roleTitle
+				}
+				currentContent = append(currentContent, trimmed)
 			}
 		}
+		flushBlock()
 
 		if histSb.Len() > 0 {
 			sb.WriteString("[Transferred Conversation History]\n")
