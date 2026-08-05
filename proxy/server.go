@@ -189,18 +189,25 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	isUndo := false
 
 	if exists && sess.MessageCount > 0 {
-		if sess.ModelType != modelCfg.ModelType || sess.ThinkingEnabled != modelCfg.ThinkingEnabled {
+		if sess.ModelType != modelCfg.ModelType {
 			modelChanged = true
-			log.Printf("Model switch detected for session %s (%s/thinking=%v -> %s/thinking=%v). Resetting DeepSeek session...",
-				claudeSessionID, sess.ModelType, sess.ThinkingEnabled, modelCfg.ModelType, modelCfg.ThinkingEnabled)
-		} else if isUndoRequest(tempPrompt, req.Messages, sess.LastMessagesLen, sess.MessageCount) {
-			isUndo = true
-			log.Printf("Undo / rewind request detected for session %s (messages len %d <= prev len %d). Creating new DeepSeek session and transferring history up to undo point...",
-				claudeSessionID, len(req.Messages), sess.LastMessagesLen)
-		} else if isCompactRequest(tempPrompt, req.System, req.Messages, sess.MessageCount) {
-			isCompacted = true
-			log.Printf("Conversation compaction / /compact detected for session %s. Creating fresh session with summary...",
-				claudeSessionID)
+			log.Printf("Base model switch detected for session %s (%s -> %s). Resetting DeepSeek session...",
+				claudeSessionID, sess.ModelType, modelCfg.ModelType)
+		} else {
+			if sess.ThinkingEnabled != modelCfg.ThinkingEnabled {
+				log.Printf("Toggling thinking mode for session %s (thinking=%v -> %v) in same DeepSeek session...",
+					claudeSessionID, sess.ThinkingEnabled, modelCfg.ThinkingEnabled)
+				sess.ThinkingEnabled = modelCfg.ThinkingEnabled
+			}
+			if isUndoRequest(tempPrompt, req.Messages, sess.LastMessagesLen, sess.MessageCount) {
+				isUndo = true
+				log.Printf("Undo / rewind request detected for session %s (messages len %d <= prev len %d). Creating new DeepSeek session and transferring history up to undo point...",
+					claudeSessionID, len(req.Messages), sess.LastMessagesLen)
+			} else if isCompactRequest(tempPrompt, req.System, req.Messages, sess.MessageCount) {
+				isCompacted = true
+				log.Printf("Conversation compaction / /compact detected for session %s. Creating fresh session with summary...",
+					claudeSessionID)
+			}
 		}
 	}
 
