@@ -963,6 +963,19 @@ func isSuggestionRequest(userPrompt string) bool {
 }
 
 func isUndoRequest(userPrompt string, messages []AnthropicMessage, lastLen int, msgCount int) bool {
+	// If the payload contains tool execution blocks (tool_result / tool_use), it is an active tool execution turn, NOT an undo!
+	for _, m := range messages {
+		if blocks, ok := m.Content.([]interface{}); ok {
+			for _, b := range blocks {
+				if bMap, isMap := b.(map[string]interface{}); isMap {
+					if t, _ := bMap["type"].(string); t == "tool_result" || t == "tool_use" {
+						return false
+					}
+				}
+			}
+		}
+	}
+
 	promptLower := strings.ToLower(userPrompt)
 
 	if strings.Contains(promptLower, "/undo") ||
