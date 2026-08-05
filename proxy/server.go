@@ -318,6 +318,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	var responseBuffer strings.Builder
 	hasTools := len(req.Tools) > 0
 
+	anthropicThinkingEnabled := hasThinkingParam
+
 	thinkingStarted := false
 	thinkingStopped := false
 	textStarted := false
@@ -325,12 +327,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	thinkingIndex := 0
 	textIndex := 0
-	if modelCfg.ThinkingEnabled {
+	if anthropicThinkingEnabled {
 		textIndex = 1
 	}
 
 	ensureThinkingStarted := func() {
-		if modelCfg.ThinkingEnabled && !thinkingStarted {
+		if anthropicThinkingEnabled && !thinkingStarted {
 			thinkingStarted = true
 			s.sendSSE(w, flusher, "content_block_start", map[string]interface{}{
 				"type":          "content_block_start",
@@ -351,7 +353,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	ensureTextStarted := func() {
-		if modelCfg.ThinkingEnabled {
+		if anthropicThinkingEnabled {
 			ensureThinkingStopped()
 		}
 		if !textStarted {
@@ -380,7 +382,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		}
 
 		if fragType == "THINK" || fragType == "REASONING" {
-			if modelCfg.ThinkingEnabled {
+			if anthropicThinkingEnabled {
 				ensureThinkingStarted()
 				s.sendSSE(w, flusher, "content_block_delta", map[string]interface{}{
 					"type":  "content_block_delta",
@@ -567,7 +569,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	if !hasTools {
-		if modelCfg.ThinkingEnabled && thinkingStarted && !thinkingStopped {
+		if anthropicThinkingEnabled && thinkingStarted && !thinkingStopped {
 			ensureThinkingStopped()
 		}
 		if textStarted && !textStopped {
