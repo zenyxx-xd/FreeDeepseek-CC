@@ -14,6 +14,7 @@ type AgentSession struct {
 	ThinkingEnabled   bool
 	lastUsedUnix      atomic.Int64
 	MessageCount      int
+	LastMessagesLen   int
 }
 
 func (s *AgentSession) GetLastUsed() time.Time {
@@ -73,6 +74,7 @@ func (sm *SessionManager) SetSession(claudeSessionID, deepseekSessionID, modelTy
 		ModelType:         modelType,
 		ThinkingEnabled:   thinkingEnabled,
 		MessageCount:      0,
+		LastMessagesLen:   0,
 	}
 	s.Touch()
 	sm.sessions[claudeSessionID] = s
@@ -94,16 +96,18 @@ func (sm *SessionManager) ResetForModelSwitch(claudeSessionID, newDeepSeekSessio
 	s.ModelType = modelType
 	s.ThinkingEnabled = thinkingEnabled
 	s.MessageCount = 0
+	s.LastMessagesLen = 0
 	s.Touch()
 	return s
 }
 
-func (sm *SessionManager) UpdateParentMessageID(claudeSessionID string, parentMsgID interface{}) {
+func (sm *SessionManager) UpdateParentMessageID(claudeSessionID string, parentMsgID interface{}, messagesLen int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	if s, ok := sm.sessions[claudeSessionID]; ok {
 		s.ParentMessageID = parentMsgID
 		s.MessageCount++
+		s.LastMessagesLen = messagesLen
 		s.Touch()
 	}
 }

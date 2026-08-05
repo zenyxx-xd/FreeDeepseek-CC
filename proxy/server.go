@@ -193,10 +193,10 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 			modelChanged = true
 			log.Printf("Model switch detected for session %s (%s/thinking=%v -> %s/thinking=%v). Resetting DeepSeek session...",
 				claudeSessionID, sess.ModelType, sess.ThinkingEnabled, modelCfg.ModelType, modelCfg.ThinkingEnabled)
-		} else if isUndoRequest(tempPrompt, req.Messages, sess.MessageCount) {
+		} else if isUndoRequest(tempPrompt, req.Messages, sess.LastMessagesLen, sess.MessageCount) {
 			isUndo = true
-			log.Printf("Undo / rewind request detected for session %s (history trimmed from %d to %d msgs). Creating new DeepSeek session and transferring history up to undo point...",
-				claudeSessionID, sess.MessageCount, len(req.Messages))
+			log.Printf("Undo / rewind request detected for session %s (messages len %d <= prev len %d). Creating new DeepSeek session and transferring history up to undo point...",
+				claudeSessionID, len(req.Messages), sess.LastMessagesLen)
 		} else if isCompactRequest(tempPrompt, req.System, req.Messages, sess.MessageCount) {
 			isCompacted = true
 			log.Printf("Conversation compaction / /compact detected for session %s. Creating fresh session with summary...",
@@ -565,7 +565,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	if finalResponseMsgID != nil {
-		s.sessionManager.UpdateParentMessageID(claudeSessionID, finalResponseMsgID)
+		s.sessionManager.UpdateParentMessageID(claudeSessionID, finalResponseMsgID, len(req.Messages))
 	}
 
 	if !hasTools {
@@ -910,7 +910,7 @@ func isSuggestionRequest(userPrompt string) bool {
 	return strings.Contains(userPrompt, "[SUGGESTION MODE:")
 }
 
-func isUndoRequest(userPrompt string, messages []AnthropicMessage, prevCount int) bool {
+func isUndoRequest(userPrompt string, messages []AnthropicMessage, lastLen int, msgCount int) bool {
 	promptLower := strings.ToLower(userPrompt)
 
 	if strings.Contains(promptLower, "/undo") ||
@@ -920,7 +920,7 @@ func isUndoRequest(userPrompt string, messages []AnthropicMessage, prevCount int
 		return true
 	}
 
-	if prevCount > 0 && len(messages) > 0 && len(messages) < prevCount {
+	if msgCount > 0 && lastLen > 0 && len(messages) > 0 && len(messages) <= lastLen {
 		return true
 	}
 
