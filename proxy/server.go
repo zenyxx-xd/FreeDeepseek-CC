@@ -85,7 +85,56 @@ func loadAuth(baseDir string) (AuthConfig, error) {
 	return AuthConfig{}, fmt.Errorf("no valid deepseek-auth.json found in search paths")
 }
 
+func ensureClaudeModelCache() {
+	home := os.Getenv("HOME")
+	paths := []string{
+		filepath.Join(home, ".claude.json"),
+		"/root/.claude.json",
+		"/data/data/com.termux/files/usr/var/lib/proot-distro/containers/debian/rootfs/root/.claude.json",
+		filepath.Join(home, ".claude", "settings.json"),
+		"/root/.claude/settings.json",
+		"/data/data/com.termux/files/usr/var/lib/proot-distro/containers/debian/rootfs/root/.claude/settings.json",
+	}
+
+	targetCache := []map[string]string{
+		{"value": "DeepSeek Pro", "label": "DeepSeek Pro", "description": "DeepSeek Expert / Pro mode"},
+		{"value": "DeepSeek Pro Thinking", "label": "DeepSeek Pro Thinking", "description": "DeepSeek Expert / Pro mode with Reasoning"},
+		{"value": "DeepSeek Flash", "label": "DeepSeek Flash", "description": "DeepSeek Fast mode"},
+		{"value": "DeepSeek Flash Thinking", "label": "DeepSeek Flash Thinking", "description": "DeepSeek Fast mode with Reasoning"},
+		{"value": "DeepSeek Vision", "label": "DeepSeek Vision", "description": "DeepSeek Multimodal Vision mode"},
+		{"value": "DeepSeek Vision Thinking", "label": "DeepSeek Vision Thinking", "description": "DeepSeek Multimodal Vision mode with Reasoning"},
+	}
+
+	targetOverrides := map[string]string{
+		"DeepSeek Pro":             "opus",
+		"DeepSeek Pro Thinking":    "fable",
+		"DeepSeek Flash":           "sonnet",
+		"DeepSeek Flash Thinking":  "haiku",
+		"DeepSeek Vision":          "haiku",
+		"DeepSeek Vision Thinking": "haiku",
+	}
+
+	for _, p := range paths {
+		if data, err := os.ReadFile(p); err == nil {
+			var m map[string]interface{}
+			if err := json.Unmarshal(data, &m); err == nil {
+				if strings.HasSuffix(p, ".claude.json") {
+					m["additionalModelOptionsCache"] = targetCache
+					m["modelOverrides"] = targetOverrides
+				} else if strings.HasSuffix(p, "settings.json") {
+					m["modelOverrides"] = targetOverrides
+				}
+				if newBytes, err := json.MarshalIndent(m, "", "  "); err == nil {
+					_ = os.WriteFile(p, newBytes, 0644)
+				}
+			}
+		}
+	}
+}
+
 func (s *Server) Start(port string) error {
+	ensureClaudeModelCache()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/messages", s.handleAnthropicMessages)
 	mux.HandleFunc("/v1/chat/completions", s.handleOpenAIChatCompletions)
