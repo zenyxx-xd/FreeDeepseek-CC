@@ -271,6 +271,31 @@ claude() {
     export ANTHROPIC_DEFAULT_FABLE_MODEL="DeepSeek Pro Thinking"
     export ANTHROPIC_DEFAULT_SONNET_MODEL="DeepSeek Flash"
     export ANTHROPIC_DEFAULT_HAIKU_MODEL="DeepSeek Flash Thinking"
+
+    if command -v node >/dev/null 2>&1; then
+        node -e '
+        const fs = require("fs");
+        const paths = [process.env.HOME + "/.claude.json", "/root/.claude.json"];
+        const targetCache = [
+          { "value": "DeepSeek Pro", "label": "DeepSeek Pro", "description": "DeepSeek Expert mode" },
+          { "value": "DeepSeek Pro Thinking", "label": "DeepSeek Pro Thinking", "description": "DeepSeek Expert mode with Reasoning" },
+          { "value": "DeepSeek Flash", "label": "DeepSeek Flash", "description": "DeepSeek Fast mode" },
+          { "value": "DeepSeek Flash Thinking", "label": "DeepSeek Flash Thinking", "description": "DeepSeek Fast mode with Reasoning" },
+          { "value": "DeepSeek Vision", "label": "DeepSeek Vision", "description": "DeepSeek Vision mode" },
+          { "value": "DeepSeek Vision Thinking", "label": "DeepSeek Vision Thinking", "description": "DeepSeek Vision mode with Reasoning" }
+        ];
+        paths.forEach(p => {
+          if (fs.existsSync(p)) {
+            try {
+              const data = JSON.parse(fs.readFileSync(p, "utf8"));
+              data.additionalModelOptionsCache = targetCache;
+              fs.writeFileSync(p, JSON.stringify(data, null, 2));
+            } catch(e){}
+          }
+        });
+        ' >/dev/null 2>&1 || true
+    fi
+
     command claude "\$@"
 }
 
@@ -303,33 +328,36 @@ EOF_TERMUX_WRAPPER
     chmod +x "$PREFIX/bin/claude" 2>/dev/null || true
 fi
 # Update additionalModelOptionsCache in .claude.json for Claude Code UI menu
-if command -v node >/dev/null 2>&1; then
-    node -e '
-    const fs = require("fs");
-    const paths = [
-      process.env.HOME + "/.claude.json",
-      "/root/.claude.json",
-      "/data/data/com.termux/files/usr/var/lib/proot-distro/containers/debian/rootfs/root/.claude.json"
-    ];
-    const targetCache = [
-      { "value": "DeepSeek Pro", "label": "DeepSeek Pro", "description": "DeepSeek Expert mode" },
-      { "value": "DeepSeek Pro Thinking", "label": "DeepSeek Pro Thinking", "description": "DeepSeek Expert mode with Reasoning" },
-      { "value": "DeepSeek Flash", "label": "DeepSeek Flash", "description": "DeepSeek Fast mode" },
-      { "value": "DeepSeek Flash Thinking", "label": "DeepSeek Flash Thinking", "description": "DeepSeek Fast mode with Reasoning" },
-      { "value": "DeepSeek Vision", "label": "DeepSeek Vision", "description": "DeepSeek Vision mode" },
-      { "value": "DeepSeek Vision Thinking", "label": "DeepSeek Vision Thinking", "description": "DeepSeek Vision mode with Reasoning" }
-    ];
-    paths.forEach(p => {
-      if (fs.existsSync(p)) {
-        try {
-          const data = JSON.parse(fs.readFileSync(p, "utf8"));
-          data.additionalModelOptionsCache = targetCache;
-          fs.writeFileSync(p, JSON.stringify(data, null, 2));
-        } catch(e){}
-      }
-    });
-    ' >/dev/null 2>&1 || true
-fi
+update_claude_json_cache() {
+    if command -v node >/dev/null 2>&1; then
+        node -e '
+        const fs = require("fs");
+        const paths = [
+          process.env.HOME + "/.claude.json",
+          "/root/.claude.json",
+          "/data/data/com.termux/files/usr/var/lib/proot-distro/containers/debian/rootfs/root/.claude.json"
+        ];
+        const targetCache = [
+          { "value": "DeepSeek Pro", "label": "DeepSeek Pro", "description": "DeepSeek Expert mode" },
+          { "value": "DeepSeek Pro Thinking", "label": "DeepSeek Pro Thinking", "description": "DeepSeek Expert mode with Reasoning" },
+          { "value": "DeepSeek Flash", "label": "DeepSeek Flash", "description": "DeepSeek Fast mode" },
+          { "value": "DeepSeek Flash Thinking", "label": "DeepSeek Flash Thinking", "description": "DeepSeek Fast mode with Reasoning" },
+          { "value": "DeepSeek Vision", "label": "DeepSeek Vision", "description": "DeepSeek Vision mode" },
+          { "value": "DeepSeek Vision Thinking", "label": "DeepSeek Vision Thinking", "description": "DeepSeek Vision mode with Reasoning" }
+        ];
+        paths.forEach(p => {
+          if (fs.existsSync(p)) {
+            try {
+              const data = JSON.parse(fs.readFileSync(p, "utf8"));
+              data.additionalModelOptionsCache = targetCache;
+              fs.writeFileSync(p, JSON.stringify(data, null, 2));
+            } catch(e){}
+          }
+        });
+        ' >/dev/null 2>&1 || true
+    fi
+}
+update_claude_json_cache
 
 if [ -r "$BASHRC" ]; then
     source "$BASHRC" 2>/dev/null || true
