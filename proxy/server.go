@@ -105,6 +105,15 @@ func ensureClaudeModelCache() {
 		{"value": "DeepSeek Vision Thinking", "label": "DeepSeek Vision Thinking", "description": "DeepSeek Multimodal Vision mode with Reasoning"},
 	}
 
+	targetAvailable := []string{
+		"DeepSeek Pro",
+		"DeepSeek Pro Thinking",
+		"DeepSeek Flash",
+		"DeepSeek Flash Thinking",
+		"DeepSeek Vision",
+		"DeepSeek Vision Thinking",
+	}
+
 	targetOverrides := map[string]string{
 		"DeepSeek Pro":             "opus",
 		"DeepSeek Pro Thinking":    "fable",
@@ -118,11 +127,10 @@ func ensureClaudeModelCache() {
 		if data, err := os.ReadFile(p); err == nil {
 			var m map[string]interface{}
 			if err := json.Unmarshal(data, &m); err == nil {
+				m["availableModels"] = targetAvailable
+				m["modelOverrides"] = targetOverrides
 				if strings.HasSuffix(p, ".claude.json") {
 					m["additionalModelOptionsCache"] = targetCache
-					m["modelOverrides"] = targetOverrides
-				} else if strings.HasSuffix(p, "settings.json") {
-					m["modelOverrides"] = targetOverrides
 				}
 				if newBytes, err := json.MarshalIndent(m, "", "  "); err == nil {
 					_ = os.WriteFile(p, newBytes, 0644)
