@@ -460,6 +460,87 @@ EOF_AUTH
     fi
 fi
 
+# Step 6: Verify Token & DeepSeek Connection Test
+step "Step 6/6: Live DeepSeek Token Verification Test"
+info "Performing test request to DeepSeek API..."
+
+TEST_RESULT=""
+if command -v python3 >/dev/null 2>&1; then
+    TEST_RESULT=$(python3 -c '
+import json, urllib.request
+
+try:
+    auth = json.load(open("'$AUTH_FILE'"))
+    token = auth.get("token", "")
+    if not token:
+        print("ERROR: Token is empty")
+        exit(0)
+    
+    req = urllib.request.Request("https://chat.deepseek.com/api/v0/chat_session/create", data=b"{}", headers={
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token,
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "x-client-platform": "web",
+        "x-client-version": "2.0.0"
+    })
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        res_data = json.loads(resp.read().decode("utf-8"))
+        if res_data.get("code") == 0:
+            print("OK")
+        else:
+            print("ERROR: " + str(res_data.get("msg", "Authorization Failed")))
+except Exception as e:
+    print("ERROR: " + str(e))
+' 2>/dev/null || true)
+elif command -v node >/dev/null 2>&1; then
+    TEST_RESULT=$(node -e '
+    const fs = require("fs");
+    const https = require("https");
+    try {
+      const auth = JSON.parse(fs.readFileSync("'$AUTH_FILE'", "utf8"));
+      const token = auth.token || "";
+      const req = https.request("https://chat.deepseek.com/api/v0/chat_session/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token,
+          "User-Agent": "Mozilla/5.0",
+          "x-client-platform": "web",
+          "x-client-version": "2.0.0"
+        }
+      }, res => {
+        let data = "";
+        res.on("data", chunk => data += chunk);
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.code === 0) console.log("OK");
+            else console.log("ERROR: " + (parsed.msg || "Authorization Failed"));
+          } catch(e) { console.log("ERROR: Invalid response"); }
+        });
+      });
+      req.on("error", e => console.log("ERROR: " + e.message));
+      req.write("{}");
+      req.end();
+    } catch(e) { console.log("ERROR: " + e.message); }
+    ' 2>/dev/null || true)
+fi
+
+if [ "$TEST_RESULT" = "OK" ]; then
+    success "✔ DeepSeek token verification SUCCESSFUL! Connection active."
+    success "✔ Токен DeepSeek успешно проверен! Подключение работает."
+else
+    echo -e ""
+    error "❌ Token verification failed (${TEST_RESULT:-Invalid token or expired session})!"
+    rm -f "$AUTH_FILE" 2>/dev/null || true
+    echo -e "\033[1;31m  ┌─────────────────────────────────────────────────────────────┐\033[0m"
+    echo -e "\033[1;31m  │ ❌ ОШИБКА АВТОРИЗАЦИИ: ВВЕДЁННЫЙ ТОКЕН НЕВАЛИДЕН ИЛИ ИСТЁК!  │\033[0m"
+    echo -e "\033[1;31m  └─────────────────────────────────────────────────────────────┘\033[0m"
+    echo -e "\033[1;33m  👉 Пожалуйста, перезайдите на https://chat.deepseek.com,\033[0m"
+    echo -e "\033[1;33m  👉 Скопируйте свежий user_token и ЗАНО ВУ ВЫПОЛНИТЕ ./install.sh!\033[0m\n"
+    exit 1
+fi
+
 step "Installation Summary"
 info "Installation Path: $INSTALL_DIR"
 info "Available Shortcuts: claude-pro, claude-pro-thinking, claude-flash, claude-flash-thinking, claude-vision, claude-vision-thinking"
