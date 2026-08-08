@@ -368,19 +368,16 @@ step "Step 5/5: Mobile DeepSeek Token Setup"
 
 AUTH_FILE="$INSTALL_DIR/deepseek-auth.json"
 
-if [ -f "$AUTH_FILE" ] && grep -q '"token"' "$AUTH_FILE" 2>/dev/null; then
-    success "Existing authentication token detected in $AUTH_FILE."
-    wrap_inst 6 "   ℹ  " 6 "\033[38;5;242m" "To update token later, edit $AUTH_FILE or delete it and re-run installer."
-    wrap_inst 6 "      " 6 "\033[38;5;242m" "(Чтобы обновить токен позже, отредактируйте $AUTH_FILE или удалите его и запустите установщик снова)."
-else
+prompt_token_input() {
     draw_instruction_text
 
     wrap_inst 6 "   👉 " 6 "\033[1;38;5;48m" "Read instruction above and press Enter to open chat.deepseek.com in browser..."
-    wrap_inst 6 "      " 6 "\033[38;5;242m" "Прочитайте инструкцию выше и нажмите Enter, чтобы открыть chat.deepseek.com в браузере..."
+    wrap_inst 6 "      " 6 "\033[38;5;242m" "(Прочитайте инструкцию выше и нажмите Enter, чтобы открыть chat.deepseek.com в браузере)."
     read -r _unused_input
 
     echo -e ""
     wrap_inst 6 "   ${CYAN}ℹ${RESET}  " 6 "\033[1;36m" "Opening https://chat.deepseek.com in your mobile browser..."
+    wrap_inst 6 "      " 6 "\033[38;5;242m" "(Открываем https://chat.deepseek.com в вашем браузере)."
 
     if command -v termux-open >/dev/null 2>&1; then
         termux-open "https://chat.deepseek.com" >/dev/null 2>&1 || true
@@ -456,17 +453,21 @@ EOF_AUTH
         fi
         chmod 600 "$AUTH_FILE"
         echo -e ""
-        success "Authentication file successfully created at $AUTH_FILE!"
+        success "Authentication file created at $AUTH_FILE."
     fi
-fi
+}
 
-# Step 6: Verify Token & DeepSeek Connection Test
-step "Step 6/6: Live DeepSeek Token Verification Test"
-info "Performing test request to DeepSeek API..."
+while true; do
+    if [ ! -f "$AUTH_FILE" ] || ! grep -q '"token"' "$AUTH_FILE" 2>/dev/null; then
+        prompt_token_input
+    fi
 
-TEST_RESULT=""
-if command -v python3 >/dev/null 2>&1; then
-    TEST_RESULT=$(python3 -c '
+    info "Performing test request ('hi') to DeepSeek API..."
+    info "(Выполняем тестовый запрос 'hi' к DeepSeek API...)"
+
+    TEST_RESULT=""
+    if command -v python3 >/dev/null 2>&1; then
+        TEST_RESULT=$(python3 -c '
 import json, urllib.request
 
 try:
@@ -492,57 +493,55 @@ try:
 except Exception as e:
     print("ERROR: " + str(e))
 ' 2>/dev/null || true)
-elif command -v node >/dev/null 2>&1; then
-    TEST_RESULT=$(node -e '
-    const fs = require("fs");
-    const https = require("https");
-    try {
-      const auth = JSON.parse(fs.readFileSync("'$AUTH_FILE'", "utf8"));
-      const token = auth.token || "";
-      const req = https.request("https://chat.deepseek.com/api/v0/chat_session/create", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + token,
-          "User-Agent": "Mozilla/5.0",
-          "x-client-platform": "web",
-          "x-client-version": "2.0.0"
-        }
-      }, res => {
-        let data = "";
-        res.on("data", chunk => data += chunk);
-        res.on("end", () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.code === 0) console.log("OK");
-            else console.log("ERROR: " + (parsed.msg || "Authorization Failed"));
-          } catch(e) { console.log("ERROR: Invalid response"); }
-        });
-      });
-      req.on("error", e => console.log("ERROR: " + e.message));
-      req.write("{}");
-      req.end();
-    } catch(e) { console.log("ERROR: " + e.message); }
-    ' 2>/dev/null || true)
-fi
+    elif command -v node >/dev/null 2>&1; then
+        TEST_RESULT=$(node -e '
+        const fs = require("fs");
+        const https = require("https");
+        try {
+          const auth = JSON.parse(fs.readFileSync("'$AUTH_FILE'", "utf8"));
+          const token = auth.token || "";
+          const req = https.request("https://chat.deepseek.com/api/v0/chat_session/create", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer " + token,
+              "User-Agent": "Mozilla/5.0",
+              "x-client-platform": "web",
+              "x-client-version": "2.0.0"
+            }
+          }, res => {
+            let data = "";
+            res.on("data", chunk => data += chunk);
+            res.on("end", () => {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.code === 0) console.log("OK");
+                else console.log("ERROR: " + (parsed.msg || "Authorization Failed"));
+              } catch(e) { console.log("ERROR: Invalid response"); }
+            });
+          });
+          req.on("error", e => console.log("ERROR: " + e.message));
+          req.write("{}");
+          req.end();
+        } catch(e) { console.log("ERROR: " + e.message); }
+        ' 2>/dev/null || true)
+    fi
 
-if [ "$TEST_RESULT" = "OK" ]; then
-    success "DeepSeek token verification SUCCESSFUL! Connection active."
-    wrap_inst 6 "      " 6 "\033[38;5;242m" "(Токен DeepSeek успешно проверен! Подключение работает)."
-else
-    echo -e ""
-    error "Token verification failed (${TEST_RESULT:-Invalid token or expired session})!"
-    rm -f "$AUTH_FILE" 2>/dev/null || true
-    echo -e "\033[1;31m  ┌─────────────────────────────────────────────────────────────┐\033[0m"
-    echo -e "\033[1;31m  │  AUTHENTICATION FAILED: PROVIDED TOKEN IS EXPIRED/INVALID   │\033[0m"
-    echo -e "\033[1;31m  │  (ОШИБКА АВТОРИЗАЦИИ: ВВЕДЁННЫЙ ТОКЕН НЕВАЛИДЕН ИЛИ ИСТЁК)  │\033[0m"
-    echo -e "\033[1;31m  └─────────────────────────────────────────────────────────────┘\033[0m"
-    echo -e "\033[1;33m  👉 Please re-open https://chat.deepseek.com,\033[0m"
-    echo -e "\033[38;5;242m     (Пожалуйста, перезайдите на https://chat.deepseek.com)\033[0m"
-    echo -e "\033[1;33m  👉 Copy a fresh user_token and re-run ./install.sh!\033[0m"
-    echo -e "\033[38;5;242m     (Скопируйте свежий user_token и заново выполните ./install.sh!)\033[0m\n"
-    exit 1
-fi
+    if [ "$TEST_RESULT" = "OK" ]; then
+        success "DeepSeek token verification SUCCESSFUL! Connection active."
+        wrap_inst 6 "      " 6 "\033[38;5;242m" "(Токен DeepSeek успешно проверен! Подключение работает)."
+        break
+    else
+        echo -e ""
+        error "Token verification failed (${TEST_RESULT:-Invalid token or expired session})!"
+        wrap_inst 6 "      " 6 "\033[38;5;242m" "(Ошибка проверки токена: ${TEST_RESULT:-Токен невалиден или истёк})."
+        rm -f "$AUTH_FILE" 2>/dev/null || true
+        echo -e ""
+        info "Invalid token. Prompting for token input again..."
+        info "(Невалидный токен. Повторно вызываем инструкцию и ввод токена...)"
+        echo -e ""
+    fi
+done
 
 step "Installation Summary"
 info "Installation Path: $INSTALL_DIR"
