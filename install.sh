@@ -528,15 +528,19 @@ fi
 
 if [ "$TEST_RESULT" = "OK" ]; then
     success "DeepSeek token verification SUCCESSFUL! Connection active."
+    wrap_inst 6 "      " 6 "\033[38;5;242m" "(Токен DeepSeek успешно проверен! Подключение работает)."
 else
     echo -e ""
     error "Token verification failed (${TEST_RESULT:-Invalid token or expired session})!"
     rm -f "$AUTH_FILE" 2>/dev/null || true
     echo -e "\033[1;31m  ┌─────────────────────────────────────────────────────────────┐\033[0m"
     echo -e "\033[1;31m  │  AUTHENTICATION FAILED: PROVIDED TOKEN IS EXPIRED/INVALID   │\033[0m"
+    echo -e "\033[1;31m  │  (ОШИБКА АВТОРИЗАЦИИ: ВВЕДЁННЫЙ ТОКЕН НЕВАЛИДЕН ИЛИ ИСТЁК)  │\033[0m"
     echo -e "\033[1;31m  └─────────────────────────────────────────────────────────────┘\033[0m"
     echo -e "\033[1;33m  👉 Please re-open https://chat.deepseek.com,\033[0m"
-    echo -e "\033[1;33m  👉 Copy a fresh user_token and re-run ./install.sh!\033[0m\n"
+    echo -e "\033[38;5;242m     (Пожалуйста, перезайдите на https://chat.deepseek.com)\033[0m"
+    echo -e "\033[1;33m  👉 Copy a fresh user_token and re-run ./install.sh!\033[0m"
+    echo -e "\033[38;5;242m     (Скопируйте свежий user_token и заново выполните ./install.sh!)\033[0m\n"
     exit 1
 fi
 
