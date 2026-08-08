@@ -217,7 +217,7 @@ step "Step 3/5: Compiling Go Proxy Binary"
 if [ -d "$INSTALL_DIR" ]; then
     info "Compiling freedeepseek-cc executable..."
     if [ -f "$INSTALL_DIR/main.go" ]; then
-        (cd "$INSTALL_DIR" && go build -o freedeepseek-cc main.go >/dev/null 2>&1 || true)
+        (cd "$INSTALL_DIR" && CGO_ENABLED=0 go build -ldflags="-s -w" -o freedeepseek-cc main.go >/dev/null 2>&1 || true)
     fi
 fi
 
