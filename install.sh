@@ -327,7 +327,7 @@ cleanup_and_exit
 EOF_TERMUX_WRAPPER
     chmod +x "$PREFIX/bin/claude" 2>/dev/null || true
 fi
-# Update additionalModelOptionsCache in .claude.json for Claude Code UI menu
+# Update additionalModelOptionsCache, availableModels and modelOverrides in .claude.json & settings.json
 update_claude_json_cache() {
     if command -v node >/dev/null 2>&1; then
         node -e '
@@ -335,24 +335,51 @@ update_claude_json_cache() {
         const paths = [
           process.env.HOME + "/.claude.json",
           "/root/.claude.json",
-          "/data/data/com.termux/files/usr/var/lib/proot-distro/containers/debian/rootfs/root/.claude.json"
+          "/data/data/com.termux/files/usr/var/lib/proot-distro/containers/debian/rootfs/root/.claude.json",
+          process.env.HOME + "/.claude/settings.json",
+          "/root/.claude/settings.json",
+          "/data/data/com.termux/files/usr/var/lib/proot-distro/containers/debian/rootfs/root/.claude/settings.json"
         ];
         const targetCache = [
-          { "value": "DeepSeek Pro", "label": "DeepSeek Pro", "description": "DeepSeek Expert mode" },
-          { "value": "DeepSeek Pro Thinking", "label": "DeepSeek Pro Thinking", "description": "DeepSeek Expert mode with Reasoning" },
+          { "value": "DeepSeek Pro", "label": "DeepSeek Pro", "description": "DeepSeek Expert / Pro mode" },
+          { "value": "DeepSeek Pro Thinking", "label": "DeepSeek Pro Thinking", "description": "DeepSeek Expert / Pro mode with Reasoning" },
           { "value": "DeepSeek Flash", "label": "DeepSeek Flash", "description": "DeepSeek Fast mode" },
           { "value": "DeepSeek Flash Thinking", "label": "DeepSeek Flash Thinking", "description": "DeepSeek Fast mode with Reasoning" },
-          { "value": "DeepSeek Vision", "label": "DeepSeek Vision", "description": "DeepSeek Vision mode" },
-          { "value": "DeepSeek Vision Thinking", "label": "DeepSeek Vision Thinking", "description": "DeepSeek Vision mode with Reasoning" }
+          { "value": "DeepSeek Vision", "label": "DeepSeek Vision", "description": "DeepSeek Multimodal Vision mode" },
+          { "value": "DeepSeek Vision Thinking", "label": "DeepSeek Vision Thinking", "description": "DeepSeek Multimodal Vision mode with Reasoning" }
         ];
+        const targetAvailable = [
+          "DeepSeek Pro",
+          "DeepSeek Pro Thinking",
+          "DeepSeek Flash",
+          "DeepSeek Flash Thinking",
+          "DeepSeek Vision",
+          "DeepSeek Vision Thinking"
+        ];
+        const targetOverrides = {
+          "DeepSeek Pro": "opus",
+          "DeepSeek Pro Thinking": "fable",
+          "DeepSeek Flash": "sonnet",
+          "DeepSeek Flash Thinking": "haiku",
+          "DeepSeek Vision": "haiku",
+          "DeepSeek Vision Thinking": "haiku"
+        };
+
         paths.forEach(p => {
-          if (fs.existsSync(p)) {
-            try {
-              const data = JSON.parse(fs.readFileSync(p, "utf8"));
+          try {
+            let data = {};
+            if (fs.existsSync(p)) {
+              data = JSON.parse(fs.readFileSync(p, "utf8"));
+            }
+            data.availableModels = targetAvailable;
+            data.modelOverrides = targetOverrides;
+            if (p.endsWith(".claude.json")) {
               data.additionalModelOptionsCache = targetCache;
-              fs.writeFileSync(p, JSON.stringify(data, null, 2));
-            } catch(e){}
-          }
+            }
+            const dir = require("path").dirname(p);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(p, JSON.stringify(data, null, 2));
+          } catch(e){}
         });
         ' >/dev/null 2>&1 || true
     fi
