@@ -918,7 +918,14 @@ func (s *Server) createDeepSeekSession() (string, error) {
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
 	var resData struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
 		Data struct {
 			BizData struct {
 				ID          string `json:"id"`
@@ -929,8 +936,14 @@ func (s *Server) createDeepSeekSession() (string, error) {
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&resData); err != nil {
-		return "", err
+	if err := json.Unmarshal(bodyBytes, &resData); err != nil {
+		return "", fmt.Errorf("failed to parse deepseek response: %w", err)
+	}
+
+	if resData.Code != 0 || resData.Msg != "" {
+		if resData.Code == 40003 || strings.Contains(strings.ToLower(resData.Msg), "token") || strings.Contains(strings.ToLower(resData.Msg), "auth") {
+			return "", fmt.Errorf("DeepSeek Auth Failed: %s (code %d). Token is expired or invalid! Please update deepseek-auth.json", resData.Msg, resData.Code)
+		}
 	}
 
 	id := resData.Data.BizData.ChatSession.ID
@@ -939,7 +952,7 @@ func (s *Server) createDeepSeekSession() (string, error) {
 	}
 
 	if id == "" {
-		return "", fmt.Errorf("no chat_session id returned from deepseek")
+		return "", fmt.Errorf("no chat_session id returned from deepseek (msg: %s, code: %d, raw: %s)", resData.Msg, resData.Code, string(bodyBytes))
 	}
 
 	return id, nil
